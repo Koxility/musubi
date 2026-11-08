@@ -1,7 +1,9 @@
 # Musubi
 
-**Musubi** (結び, „Verbindung, Knoten“) streamt Anime von deinem Jellyfin-Server und verwaltet deine AniList vollständig. Es gibt eine GTK-Oberfläche und eine keyboard-first TUI mit gleichem Funktionsumfang. Beide nutzen denselben Kern.
+**Musubi** (結び, „Verbindung, Knoten“) streamt Anime von deinem Jellyfin-Server und verwaltet deine AniList vollständig. Es gibt eine GUI mit Iced und eine keyboard-first TUI mit gleichem Funktionsumfang. Beide nutzen denselben Kern.
 
+- **Startseite:** großes Titelbild und Regale für Weiterschauen, Nächste Episoden und Zuletzt hinzugefügt, wie in einem Mediacenter.
+- **AniList-Übersicht:** Airing mit Countdown und Rückstand, Anime und Manga in Progress, `+` für die nächste Episode.
 - **Jellyfin:** Login per Passwort oder API-Key, Bibliothek durchsuchen und filtern (Genre, Status, Jahr, Typ), Episoden mit Metadaten, Direct Stream mit Transcoding-Fallback, Fortschritt wird zurückgemeldet.
 - **AniList:** Einträge anlegen, bearbeiten und löschen, Status, Fortschritt (Episoden, Kapitel, Bände), Score in deinem Format, Advanced Scoring, Notizen, Custom Lists, Start- und Enddatum, Private und Sichtbarkeit. Funktioniert auch ganz ohne Jellyfin.
 - **Sync:** automatisch beim Schauen oder manuell mit Vorschau. Schreibzugriffe landen in einer Warteschlange und gehen offline nicht verloren.
@@ -15,14 +17,14 @@ Linux mit Wayland oder X11 und:
 | Paket | Zweck |
 |---|---|
 | Rust ab 1.95 | Build |
+| Bun | Build der TUI |
 | `mpv` | Wiedergabe (zur Laufzeit) |
-| `gtk4` ≥ 4.18, `libadwaita` ≥ 1.7 | nur für die GUI |
 | C-Compiler, `pkgconf` | Build (SQLite wird mitgebaut) |
 
 Auf Arch, CachyOS und Verwandten:
 
 ```bash
-sudo pacman -S --needed base-devel gtk4 libadwaita mpv
+sudo pacman -S --needed base-devel bun mpv
 ```
 
 Rust installierst du über [rustup](https://rustup.rs). Liegt es wie hier unter `~/.cargo/bin` und du nutzt fish:
@@ -41,7 +43,21 @@ cargo build --release
 cargo install --path crates/musubi
 ```
 
-Nur die TUI, ohne GTK:
+Die TUI ist ein eigenes Programm mit [Ink](https://github.com/vadimdemedes/ink) und liegt in `tui/`. `musubi tui` sucht es neben dem `musubi`-Programm:
+
+```bash
+bun install --cwd tui --frozen-lockfile
+```
+
+```bash
+bun run --cwd tui build
+```
+
+```bash
+install -Dm755 tui/dist/musubi-tui ~/.cargo/bin/musubi-tui
+```
+
+Nur der TUI-Teil, ohne GUI:
 
 ```bash
 cargo install --path crates/musubi --no-default-features --features tui
@@ -122,9 +138,6 @@ backend = "file"            # oder "secret-service" für KWallet/GNOME Keyring
 [ui]
 default = "auto"            # "gui" oder "tui"
 
-[tui]
-posters = true
-
 [tui.keys]                  # Beispiel: Tasten umlegen
 play = "P"
 ```
@@ -157,17 +170,17 @@ musubi sync
 
 | Taste | Aktion |
 |---|---|
-| `1`–`4`, `Tab` | Bibliothek, AniList, Mapping, Sync |
+| `1`–`5`, `Tab` | Home, Bibliothek, AniList, Mapping, Sync |
 | `j` `k` `g` `G` `Ctrl-d` `Ctrl-u` | Navigation |
 | `/` | Fuzzy-Filter |
 | `F` | Serverfilter: Genre, Jahr, Status, Typ, Sortierung |
-| `Enter` | öffnen, abspielen, bearbeiten |
+| `Enter` `i` | öffnen, abspielen, bearbeiten, Details |
 | `c` | mit der nächsten ungesehenen Episode weitermachen |
 | `w` | gesehen in Jellyfin umschalten |
 | `+` `-` | AniList-Fortschritt |
 | `s` `S` `e` | Status, Score, kompletter Editor |
 | `a` `d` | hinzufügen, entfernen |
-| `t` `[` `]` | Anime/Manga, Statusfilter |
+| `t` `[` `]` | Übersicht/Anime/Manga, Statusfilter |
 | `m` `M` | Titel zuordnen, alles automatisch zuordnen |
 | `A` | Sync anwenden (im Sync-Tab wechselt `d` die Richtung) |
 | `Leertaste` `←` `→` | Pause, 10 s spulen |
@@ -177,16 +190,20 @@ musubi sync
 
 Die Befehlszeile `:` kennt `:status completed`, `:score 8.5`, `:progress 7`, `:notes Text`, `:private on|off`, `:list-create Name`, `:list-delete Name`, `:list-rename Alt -> Neu`, `:sync`, `:match`, `:flush`, `:setup`, `:login [anilist]` und `:logout jellyfin|anilist`.
 
-Alle Aktionsnamen für `[tui.keys]` stehen in `crates/musubi-tui/src/keys.rs`.
+Alle Aktionsnamen für `[tui.keys]` stehen in `tui/src/keys.ts`.
 
 ### GUI
 
-`F1` zeigt alle Kürzel. Die wichtigsten sind `Ctrl+1` bis `Ctrl+5` für die Seiten, `Ctrl+F` für die Suche, `Ctrl+R` zum Aktualisieren, `Ctrl+P` für Pause und `Alt+←/→` zum Spulen. Im mpv-Fenster gelten die üblichen mpv-Tasten, `<` und `>` wechseln die Episode.
+`F1` zeigt alle Kürzel. Die wichtigsten sind `Ctrl+1` bis `Ctrl+6` für die Seiten, `Ctrl+R` zum Aktualisieren, `Ctrl+P` für Pause und `Alt+←/→` zum Spulen. `Esc` schließt Dialoge und Detailseiten. Im mpv-Fenster gelten die üblichen mpv-Tasten.
 
 ## Entwicklung
 
 ```bash
 cargo test --workspace
+```
+
+```bash
+bun test --cwd tui
 ```
 
 ```bash

@@ -142,22 +142,11 @@ pub struct UiConfig {
     pub setup_completed: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TuiConfig {
-    /// Poster in der Detailansicht anzeigen.
-    pub posters: bool,
     /// Überschreibt Tasten, z. B. `play = "p"`.
     pub keys: BTreeMap<String, String>,
-}
-
-impl Default for TuiConfig {
-    fn default() -> Self {
-        Self {
-            posters: true,
-            keys: BTreeMap::new(),
-        }
-    }
 }
 
 impl Config {

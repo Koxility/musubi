@@ -68,7 +68,7 @@ pub struct CoreOptions {
     pub player: Option<Arc<dyn PlayerBackend>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize)]
 pub struct AuthStatus {
     pub jellyfin_user: Option<String>,
     pub jellyfin_url: Option<String>,

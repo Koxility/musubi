@@ -32,9 +32,38 @@ pub struct LibraryItem {
     pub runtime_secs: Option<u64>,
     pub provider_ids: BTreeMap<String, String>,
     pub has_poster: bool,
+    /// Fehlt in Zwischenspeichern aus älteren Versionen.
+    #[serde(default)]
+    pub has_backdrop: bool,
     pub played: bool,
     pub unplayed_count: Option<u32>,
     pub position_secs: u64,
+}
+
+/// Eintrag eines Regals auf der Startseite.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShelfItem {
+    pub id: String,
+    /// Serie einer Episode, sonst das Item selbst.
+    pub library_id: String,
+    pub is_episode: bool,
+    /// Serientitel bei Episoden, sonst der Name des Films oder der Serie.
+    pub title: String,
+    /// Bei Episoden z. B. `S1:E3 · Name`.
+    pub subtitle: Option<String>,
+    pub overview: Option<String>,
+    pub year: Option<i32>,
+    pub runtime_secs: Option<u64>,
+    pub position_secs: u64,
+    pub has_image: bool,
+}
+
+impl ShelfItem {
+    /// Gesehener Anteil von 0 bis 1, falls die Laufzeit bekannt ist.
+    pub fn progress(&self) -> Option<f32> {
+        let runtime = self.runtime_secs.filter(|r| *r > 0)?;
+        (self.position_secs > 0).then(|| (self.position_secs as f32 / runtime as f32).min(1.0))
+    }
 }
 
 impl LibraryItem {
@@ -79,7 +108,8 @@ pub enum LibrarySort {
 }
 
 /// Such- und Filterkriterien für die Bibliothek.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct LibraryQuery {
     pub library_id: Option<String>,
     pub search: Option<String>,

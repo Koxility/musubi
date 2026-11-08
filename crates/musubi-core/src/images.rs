@@ -35,6 +35,21 @@ impl Core {
         Ok(path)
     }
 
+    /// Pfad zum breiten Hintergrundbild eines Jellyfin-Items.
+    pub async fn backdrop(&self, item_id: &str) -> Result<PathBuf> {
+        let path = self
+            .inner
+            .paths
+            .images_dir()
+            .join(cache_name("jf-backdrop", item_id));
+        if !path.exists() {
+            let session = self.require_jellyfin()?;
+            let bytes = session.client.backdrop(item_id, 1280).await?;
+            self.store_image(&path, &bytes).await?;
+        }
+        Ok(path)
+    }
+
     /// Pfad zum AniList-Cover.
     pub async fn cover(&self, url: &str) -> Result<PathBuf> {
         let path = self.inner.paths.images_dir().join(cache_name("al", url));

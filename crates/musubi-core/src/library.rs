@@ -4,16 +4,27 @@ use std::collections::{HashMap, HashSet};
 
 use musubi_domain::{
     Episode, Library, LibraryFilters, LibraryItem, LibraryQuery, ListEntry, Mapping, Season,
-    resolve_episode,
+    ShelfItem, resolve_episode,
 };
 
+use serde::Serialize;
+
 use crate::inner::now;
-use crate::{Core, Result};
+use crate::{Core, CoreError, Result};
 
 const CACHE_LIBRARY: &str = "library.default";
+const SHELF_LIMIT: u32 = 24;
+
+/// Die Regale der Startseite.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
+pub struct HomeShelves {
+    pub continue_watching: Vec<ShelfItem>,
+    pub next_up: Vec<ShelfItem>,
+    pub latest: Vec<ShelfItem>,
+}
 
 /// Eine Zeile der Bibliothek, wie beide Oberflächen sie anzeigen.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct LibraryRow {
     pub item: LibraryItem,
     pub mappings: Vec<Mapping>,
@@ -22,7 +33,7 @@ pub struct LibraryRow {
     pub needs_review: bool,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct EpisodeRow {
     pub episode: Episode,
     pub anilist: Option<(i64, u32)>,
@@ -31,6 +42,37 @@ pub struct EpisodeRow {
 }
 
 impl Core {
+    /// Lädt Weiterschauen, Nächste Episoden und Zuletzt hinzugefügt.
+    pub async fn home(&self) -> Result<HomeShelves> {
+        let session = self.require_jellyfin()?;
+        let (continue_watching, next_up, latest) = tokio::try_join!(
+            session.client.resume(&session.user_id, SHELF_LIMIT),
+            session.client.next_up(&session.user_id, SHELF_LIMIT),
+            session.client.latest(&session.user_id, SHELF_LIMIT),
+        )?;
+        // Eine angefangene Episode steht nur unter Weiterschauen.
+        let resumed: HashSet<&str> = continue_watching.iter().map(|i| i.id.as_str()).collect();
+        let next_up = next_up
+            .into_iter()
+            .filter(|i| !resumed.contains(i.id.as_str()))
+            .collect();
+        Ok(HomeShelves {
+            continue_watching,
+            next_up,
+            latest,
+        })
+    }
+
+    /// Serie oder Film zu einem Regaleintrag.
+    pub async fn library_item(&self, item_id: &str) -> Result<LibraryItem> {
+        let session = self.require_jellyfin()?;
+        session
+            .client
+            .item(&session.user_id, item_id)
+            .await?
+            .ok_or_else(|| CoreError::Invalid(format!("{item_id} is not a series or movie")))
+    }
+
     pub async fn libraries(&self) -> Result<Vec<Library>> {
         let session = self.require_jellyfin()?;
         Ok(session.client.libraries(&session.user_id).await?)

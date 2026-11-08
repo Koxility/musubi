@@ -17,7 +17,7 @@ mod sync_ops;
 pub use error::{CoreError, Result, Service};
 pub use events::{CoreEvent, PlaybackState};
 pub use inner::{AuthStatus, Core, CoreOptions};
-pub use library::{EpisodeRow, LibraryRow};
+pub use library::{EpisodeRow, HomeShelves, LibraryRow};
 pub use mapping_ops::MatchOutcome;
 pub use sync::{SyncDecision, SyncDirection, SyncRow};
 pub use sync_ops::SyncReport;

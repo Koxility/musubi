@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 
 use musubi_domain::{
     Episode, ItemKind, Library, LibraryFilters, LibraryItem, LibraryQuery, LibrarySort, Season,
+    ShelfItem,
 };
 use reqwest::{Method, RequestBuilder, Response, StatusCode, header};
 use secrecy::{ExposeSecret, SecretString};
@@ -460,9 +461,60 @@ impl Client {
         Ok(())
     }
 
-    pub async fn poster(&self, item_id: &str, max_width: u32) -> Result<Vec<u8>> {
+    fn shelf_params(user_id: &str, limit: u32) -> Vec<(&'static str, String)> {
+        vec![
+            ("userId", user_id.to_owned()),
+            ("limit", limit.to_string()),
+            ("fields", "Overview".to_owned()),
+            ("enableUserData", "true".to_owned()),
+        ]
+    }
+
+    fn shelf(items: Vec<ItemDto>) -> Vec<ShelfItem> {
+        items
+            .into_iter()
+            .filter_map(ItemDto::into_shelf_item)
+            .collect()
+    }
+
+    /// Angefangene Episoden und Filme.
+    pub async fn resume(&self, user_id: &str, limit: u32) -> Result<Vec<ShelfItem>> {
+        let mut params = Self::shelf_params(user_id, limit);
+        params.push(("mediaTypes", "Video".to_owned()));
+        let page: PagedDto<ItemDto> = self.get_json("UserItems/Resume", &params).await?;
+        Ok(Self::shelf(page.items))
+    }
+
+    /// Die jeweils nächste ungesehene Episode laufender Serien.
+    pub async fn next_up(&self, user_id: &str, limit: u32) -> Result<Vec<ShelfItem>> {
+        let params = Self::shelf_params(user_id, limit);
+        let page: PagedDto<ItemDto> = self.get_json("Shows/NextUp", &params).await?;
+        Ok(Self::shelf(page.items))
+    }
+
+    /// Zuletzt hinzugefügte Titel. Mehrere neue Episoden fasst der Server zur Serie zusammen.
+    pub async fn latest(&self, user_id: &str, limit: u32) -> Result<Vec<ShelfItem>> {
+        let mut params = Self::shelf_params(user_id, limit);
+        params.push(("includeItemTypes", "Episode,Movie".to_owned()));
+        params.push(("groupItems", "true".to_owned()));
+        let items: Vec<ItemDto> = self.get_json("Items/Latest", &params).await?;
+        Ok(Self::shelf(items))
+    }
+
+    /// Ein einzelnes Item, `None` wenn es keine Serie und kein Film ist.
+    pub async fn item(&self, user_id: &str, item_id: &str) -> Result<Option<LibraryItem>> {
+        let dto: ItemDto = self
+            .get_json(
+                &format!("Items/{item_id}"),
+                &[("userId", user_id.to_owned())],
+            )
+            .await?;
+        Ok(dto.into_library_item())
+    }
+
+    async fn image(&self, item_id: &str, kind: &str, max_width: u32) -> Result<Vec<u8>> {
         let response = Self::send(
-            self.request(Method::GET, &format!("Items/{item_id}/Images/Primary"))
+            self.request(Method::GET, &format!("Items/{item_id}/Images/{kind}"))
                 .query(&[
                     ("maxWidth", max_width.to_string()),
                     ("quality", "90".to_owned()),
@@ -470,6 +522,14 @@ impl Client {
         )
         .await?;
         Ok(response.bytes().await?.to_vec())
+    }
+
+    pub async fn poster(&self, item_id: &str, max_width: u32) -> Result<Vec<u8>> {
+        self.image(item_id, "Primary", max_width).await
+    }
+
+    pub async fn backdrop(&self, item_id: &str, max_width: u32) -> Result<Vec<u8>> {
+        self.image(item_id, "Backdrop", max_width).await
     }
 
     // Wiedergabe -------------------------------------------------------------------------

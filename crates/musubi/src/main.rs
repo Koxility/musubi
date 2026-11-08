@@ -205,7 +205,7 @@ fn start_ui(runtime: &tokio::runtime::Runtime, core: Core, ui: Ui) -> Result<()>
             #[cfg(feature = "gui")]
             {
                 let _enter = runtime.enter();
-                musubi_gtk::run(core.clone())?;
+                musubi_gui::run(core.clone())?;
                 runtime.block_on(async {
                     let _ = core.player_command(PlayerCommand::Stop).await;
                 });

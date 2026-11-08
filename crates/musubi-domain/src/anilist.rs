@@ -323,6 +323,17 @@ pub struct Media {
     pub description: Option<String>,
     pub genres: Vec<String>,
     pub average_score: Option<u32>,
+    /// Fehlt in Zwischenspeichern aus älteren Versionen.
+    #[serde(default)]
+    pub next_airing: Option<NextAiring>,
+}
+
+/// Die nächste Ausstrahlung eines laufenden Anime.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NextAiring {
+    /// Unix-Zeit in Sekunden.
+    pub airing_at: i64,
+    pub episode: u32,
 }
 
 impl Media {
@@ -355,6 +366,39 @@ pub struct ListEntry {
     pub started_at: FuzzyDate,
     pub completed_at: FuzzyDate,
     pub updated_at: i64,
+}
+
+impl ListEntry {
+    fn is_watching(&self) -> bool {
+        matches!(self.status, ListStatus::Current | ListStatus::Repeating)
+    }
+
+    /// Bereits ausgestrahlte Episoden, die noch nicht gesehen sind.
+    pub fn episodes_behind(&self) -> u32 {
+        self.media.next_airing.map_or(0, |next| {
+            next.episode.saturating_sub(1).saturating_sub(self.progress)
+        })
+    }
+}
+
+/// Aktuell geschaute Titel mit kommender Ausstrahlung, die nächste Folge zuerst.
+pub fn airing_entries(entries: &[ListEntry]) -> Vec<&ListEntry> {
+    let mut airing: Vec<&ListEntry> = entries
+        .iter()
+        .filter(|e| e.is_watching() && e.media.next_airing.is_some())
+        .collect();
+    airing.sort_by_key(|e| e.media.next_airing.map(|next| next.airing_at));
+    airing
+}
+
+/// Aktuell geschaute Titel ohne kommende Ausstrahlung, zuletzt bearbeitete zuerst.
+pub fn in_progress_entries(entries: &[ListEntry]) -> Vec<&ListEntry> {
+    let mut progress: Vec<&ListEntry> = entries
+        .iter()
+        .filter(|e| e.is_watching() && e.media.next_airing.is_none())
+        .collect();
+    progress.sort_by_key(|e| std::cmp::Reverse(e.updated_at));
+    progress
 }
 
 /// Teil-Update eines Listeneintrags. `None` lässt ein Feld unverändert.
@@ -528,5 +572,67 @@ mod tests {
         });
         assert_eq!(old.progress, Some(4));
         assert_eq!(old.notes.as_deref(), Some("a"));
+    }
+
+    fn watching(
+        media_id: i64,
+        progress: u32,
+        next: Option<(i64, u32)>,
+        updated_at: i64,
+    ) -> ListEntry {
+        ListEntry {
+            id: media_id,
+            media: Media {
+                id: media_id,
+                next_airing: next.map(|(airing_at, episode)| NextAiring { airing_at, episode }),
+                ..Media::default()
+            },
+            status: ListStatus::Current,
+            score_raw: 0,
+            progress,
+            progress_volumes: 0,
+            repeat: 0,
+            priority: 0,
+            private: false,
+            hidden_from_status_lists: false,
+            notes: String::new(),
+            custom_lists: vec![],
+            advanced_scores: vec![],
+            started_at: FuzzyDate::default(),
+            completed_at: FuzzyDate::default(),
+            updated_at,
+        }
+    }
+
+    #[test]
+    fn airing_and_in_progress_split_the_watching_list() {
+        let mut planned = watching(5, 0, Some((10, 2)), 0);
+        planned.status = ListStatus::Planning;
+        let entries = [
+            watching(1, 0, Some((500, 2)), 0),
+            watching(2, 0, Some((100, 2)), 0),
+            watching(3, 0, None, 10),
+            watching(4, 0, None, 20),
+            planned,
+        ];
+        let ids = |list: Vec<&ListEntry>| list.iter().map(|e| e.media.id).collect::<Vec<_>>();
+        assert_eq!(ids(airing_entries(&entries)), vec![2, 1]);
+        assert_eq!(ids(in_progress_entries(&entries)), vec![4, 3]);
+    }
+
+    #[test]
+    fn behind_counts_aired_but_unwatched_episodes() {
+        assert_eq!(watching(1, 2, Some((0, 8)), 0).episodes_behind(), 5);
+        assert_eq!(watching(1, 7, Some((0, 8)), 0).episodes_behind(), 0);
+        assert_eq!(watching(1, 9, Some((0, 8)), 0).episodes_behind(), 0);
+        assert_eq!(watching(1, 2, None, 0).episodes_behind(), 0);
+    }
+
+    #[test]
+    fn cached_media_without_airing_data_still_loads() {
+        let mut value = serde_json::to_value(Media::default()).unwrap();
+        value.as_object_mut().unwrap().remove("next_airing");
+        let media: Media = serde_json::from_value(value).unwrap();
+        assert_eq!(media.next_airing, None);
     }
 }

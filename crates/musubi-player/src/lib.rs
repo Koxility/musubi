@@ -57,7 +57,7 @@ pub struct OpenRequest {
     pub first: PlayItem,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Deserialize)]
 pub enum PlayerCommand {
     TogglePause,
     SeekRelative(f64),

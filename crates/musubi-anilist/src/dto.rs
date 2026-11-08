@@ -1,7 +1,7 @@
 //! Antwort-Strukturen von AniList und ihre Umwandlung in Fachtypen.
 
 use musubi_domain::{
-    FuzzyDate, ListEntry, ListStatus, Media, MediaKind, MediaTitle, ScoreFormat, Viewer,
+    FuzzyDate, ListEntry, ListStatus, Media, MediaKind, MediaTitle, NextAiring, ScoreFormat, Viewer,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -71,6 +71,14 @@ pub struct MediaDto {
     pub description: Option<String>,
     pub genres: Option<Vec<Option<String>>>,
     pub average_score: Option<u32>,
+    pub next_airing_episode: Option<NextAiringDto>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NextAiringDto {
+    pub airing_at: i64,
+    pub episode: u32,
 }
 
 /// Entfernt die wenigen HTML-Tags, die AniList auch bei `asHtml: false` mitliefert.
@@ -115,6 +123,10 @@ impl From<MediaDto> for Media {
             description: d.description.as_deref().map(strip_tags),
             genres: d.genres.unwrap_or_default().into_iter().flatten().collect(),
             average_score: d.average_score,
+            next_airing: d.next_airing_episode.map(|next| NextAiring {
+                airing_at: next.airing_at,
+                episode: next.episode,
+            }),
         }
     }
 }

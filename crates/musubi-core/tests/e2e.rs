@@ -210,6 +210,7 @@ fn series() -> LibraryItem {
         runtime_secs: None,
         provider_ids: Default::default(),
         has_poster: false,
+        has_backdrop: false,
         played: false,
         unplayed_count: None,
         position_secs: 1,

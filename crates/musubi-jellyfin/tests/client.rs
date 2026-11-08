@@ -253,3 +253,46 @@ fn rejects_non_http_urls() {
         Err(Error::InvalidUrl(_))
     ));
 }
+
+#[tokio::test]
+async fn shelves_use_current_endpoints_and_map_episodes() {
+    let server = MockServer::start().await;
+    let episode = json!({
+        "Id": "e3", "Name": "Pilot", "Type": "Episode", "SeriesId": "s", "SeriesName": "Show",
+        "ParentIndexNumber": 2, "IndexNumber": 3, "RunTimeTicks": 12_000_000_000u64,
+        "ImageTags": {"Primary": "tag"},
+        "UserData": {"PlaybackPositionTicks": 6_000_000_000u64}
+    });
+    Mock::given(method("GET"))
+        .and(path("/UserItems/Resume"))
+        .and(query_param("userId", "u"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({ "Items": [episode.clone()] })),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/Items/Latest"))
+        .and(query_param("groupItems", "true"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            {"Id": "m", "Name": "Movie", "Type": "Movie"},
+            {"Id": "x", "Name": "Season", "Type": "Season"},
+        ])))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = client(&server);
+    let resume = client.resume("u", 10).await.unwrap();
+    assert_eq!(resume.len(), 1);
+    assert_eq!(resume[0].library_id, "s");
+    assert_eq!(resume[0].title, "Show");
+    assert_eq!(resume[0].subtitle.as_deref(), Some("S2:E3 · Pilot"));
+    assert_eq!(resume[0].progress(), Some(0.5));
+
+    let latest = client.latest("u", 10).await.unwrap();
+    assert_eq!(latest.len(), 1);
+    assert_eq!(latest[0].library_id, "m");
+    assert!(!latest[0].is_episode);
+}

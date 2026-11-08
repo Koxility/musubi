@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use musubi_domain::{Episode, ItemKind, LibraryItem};
+use musubi_domain::{Episode, ItemKind, LibraryItem, ShelfItem};
 use serde::Deserialize;
 
 use crate::{provider_map, ticks_to_secs};
@@ -58,7 +58,9 @@ pub struct ItemDto {
     pub run_time_ticks: Option<u64>,
     pub provider_ids: Option<BTreeMap<String, Option<String>>>,
     pub image_tags: Option<BTreeMap<String, Option<String>>>,
+    pub backdrop_image_tags: Option<Vec<String>>,
     pub user_data: Option<UserDataDto>,
+    pub series_id: Option<String>,
     pub series_name: Option<String>,
     pub index_number: Option<u32>,
     pub parent_index_number: Option<u32>,
@@ -78,6 +80,10 @@ impl ItemDto {
             _ => return None,
         };
         let has_poster = self.has_primary();
+        let has_backdrop = self
+            .backdrop_image_tags
+            .as_ref()
+            .is_some_and(|tags| !tags.is_empty());
         let user = self.user_data.unwrap_or_default();
         Some(LibraryItem {
             id: self.id,
@@ -91,6 +97,7 @@ impl ItemDto {
             runtime_secs: self.run_time_ticks.map(ticks_to_secs),
             provider_ids: provider_map(self.provider_ids),
             has_poster,
+            has_backdrop,
             played: user.played,
             unplayed_count: user.unplayed_item_count,
             position_secs: ticks_to_secs(user.playback_position_ticks),
@@ -113,6 +120,45 @@ impl ItemDto {
             position_secs: ticks_to_secs(user.playback_position_ticks),
             has_image,
         }
+    }
+
+    /// Episoden, Filme und Serien können auf der Startseite stehen, alles andere nicht.
+    pub fn into_shelf_item(self) -> Option<ShelfItem> {
+        let is_episode = match self.item_type.as_deref() {
+            Some("Episode") => true,
+            Some("Movie" | "Series") => false,
+            _ => return None,
+        };
+        let library_id = if is_episode {
+            self.series_id.clone()?
+        } else {
+            self.id.clone()
+        };
+        let has_image = self.has_primary();
+        let user = self.user_data.unwrap_or_default();
+        let (title, subtitle) = if is_episode {
+            let subtitle = format!(
+                "S{}:E{} · {}",
+                self.parent_index_number.unwrap_or(1),
+                self.index_number.unwrap_or(0),
+                self.name
+            );
+            (self.series_name.unwrap_or(self.name), Some(subtitle))
+        } else {
+            (self.name, None)
+        };
+        Some(ShelfItem {
+            id: self.id,
+            library_id,
+            is_episode,
+            title,
+            subtitle,
+            overview: self.overview,
+            year: self.production_year,
+            runtime_secs: self.run_time_ticks.map(ticks_to_secs),
+            position_secs: ticks_to_secs(user.playback_position_ticks),
+            has_image,
+        })
     }
 }
 

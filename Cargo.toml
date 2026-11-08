@@ -24,7 +24,7 @@ musubi-player = { path = "crates/musubi-player" }
 musubi-store = { path = "crates/musubi-store" }
 musubi-core = { path = "crates/musubi-core" }
 musubi-tui = { path = "crates/musubi-tui" }
-musubi-gtk = { path = "crates/musubi-gtk" }
+musubi-gui = { path = "crates/musubi-gui" }
 
 # Async
 tokio = { version = "1.54", features = ["rt-multi-thread", "macros", "net", "process", "sync", "time", "signal", "io-util", "fs"] }
@@ -63,14 +63,9 @@ open = "5.4"
 rpassword = "7"
 
 # TUI
-ratatui = "0.30"
-crossterm = { version = "0.29", features = ["event-stream"] }
-nucleo-matcher = "0.3"
-ratatui-image = { version = "11", default-features = false, features = ["crossterm"] }
-image = "0.25"
 
-# GUI (gtk und adw kommen über die Re-Exporte von relm4)
-relm4 = { version = "0.11", features = ["libadwaita", "gnome_48"] }
+# GUI
+iced = { version = "0.14", features = ["image", "tokio", "advanced"] }
 
 # Tests
 wiremock = "0.6"

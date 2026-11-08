@@ -7,6 +7,7 @@
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 use wiremock::matchers::{method, path, path_regex};
@@ -46,11 +47,33 @@ fn series_json((id, name, year, episodes, status): (&str, &str, i32, u32, &str))
     })
 }
 
+fn unix_now() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64)
+}
+
+fn episode_json(series: &str, title: &str, number: u32, position_ticks: u64) -> Value {
+    json!({
+        "Id": format!("{series}-e{number}"), "Name": format!("Episode {number}"), "Type": "Episode",
+        "SeriesId": series, "SeriesName": title, "ParentIndexNumber": 1, "IndexNumber": number,
+        "Overview": format!("Demo overview of {title}, episode {number}."),
+        "RunTimeTicks": 14_400_000_000u64,
+        "UserData": {"Played": false, "PlaybackPositionTicks": position_ticks}
+    })
+}
+
 fn media_json(id: i64, title: &str, year: i32, episodes: u32) -> Value {
+    // Jeder zweite Titel läuft noch und zeigt so die Airing-Ansicht.
+    let airing = id % 2 == 1;
     json!({
         "id": id, "type": "ANIME", "title": {"romaji": title, "native": null}, "format": "TV",
-        "status": "FINISHED", "episodes": episodes, "seasonYear": year, "genres": ["Fantasy"],
-        "description": format!("AniList description of {title}.")
+        "status": if airing { "RELEASING" } else { "FINISHED" }, "episodes": episodes,
+        "seasonYear": year, "genres": ["Fantasy"],
+        "description": format!("AniList description of {title}."),
+        "nextAiringEpisode": airing.then(|| json!({
+            "airingAt": unix_now() + 90_000 * id, "episode": episodes.min(8)
+        })),
     })
 }
 
@@ -102,8 +125,41 @@ async fn jellyfin(video: Option<PathBuf>) -> MockServer {
         .mount(&server)
         .await;
     Mock::given(method("GET"))
+        .and(path("/UserItems/Resume"))
+        .respond_with(ok(json!({"Items": [
+            episode_json("s-frieren", SHOWS[0].1, 3, 7_200_000_000),
+            episode_json("s-mob", SHOWS[1].1, 5, 3_000_000_000),
+        ]})))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/Shows/NextUp"))
+        .respond_with(ok(json!({"Items": [
+            episode_json("s-apoth", SHOWS[2].1, 4, 0),
+            episode_json("s-bocchi", SHOWS[4].1, 9, 0),
+        ]})))
+        .mount(&server)
+        .await;
+    let latest: Vec<Value> = SHOWS.iter().map(|s| series_json(*s)).collect();
+    Mock::given(method("GET"))
+        .and(path("/Items/Latest"))
+        .respond_with(ok(json!(latest)))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
         .and(path("/Items"))
         .respond_with(ok(json!({"Items": items, "TotalRecordCount": total})))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path_regex("^/Items/s-[a-z]+$"))
+        .respond_with(|request: &Request| {
+            let id = request.url.path().rsplit('/').next().unwrap_or_default();
+            match SHOWS.iter().find(|s| s.0 == id) {
+                Some(show) => ok(series_json(*show)),
+                None => ResponseTemplate::new(404),
+            }
+        })
         .mount(&server)
         .await;
     Mock::given(method("GET")).and(path_regex("^/Shows/[^/]+/Episodes$"))
@@ -147,6 +203,7 @@ async fn anilist() -> MockServer {
         entry_json(1, 101, "Sousou no Frieren", 2023, 28, "CURRENT", 2),
         entry_json(2, 102, "Mob Psycho 100", 2016, 12, "COMPLETED", 12),
         entry_json(3, 103, "Kusuriya no Hitorigoto", 2023, 24, "PLANNING", 0),
+        entry_json(4, 104, "Mob Psycho 100 II", 2019, 13, "CURRENT", 6),
     ]));
     Mock::given(method("POST"))
         .respond_with(move |request: &Request| {

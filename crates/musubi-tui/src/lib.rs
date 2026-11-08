@@ -1,140 +1,117 @@
-//! Keyboard-first Terminal-Oberfläche.
+//! Terminal-Oberfläche: startet das Ink-Frontend und bedient es über einen privaten Socket.
 //!
-//! Aufbau nach dem Elm-Muster: Tasten und Ergebnisse ändern den Zustand in [`app::App`] und
-//! liefern `Effect`-Werte. Nur [`effects`] spricht mit dem Kern, nur [`view`] zeichnet.
+//! Das Frontend ist ein eigenes Programm in TypeScript (`tui/`) und erbt das Terminal. Der
+//! Rust-Kern bleibt im Elternprozess, sodass Sync, Outbox und mpv unverändert laufen.
 
-pub mod app;
-mod effects;
-pub mod form;
-pub mod fuzzy;
-pub mod keys;
-pub mod view;
+pub mod rpc;
 
-use std::time::Duration;
+use std::path::{Path, PathBuf};
 
-use anyhow::Result;
-use crossterm::event::{Event, EventStream, KeyEventKind};
-use futures::StreamExt;
-use musubi_core::{Core, PlayerCommand, oauth};
-use ratatui_image::picker::Picker;
-use tokio::sync::{broadcast, mpsc};
+use anyhow::{Context, Result, bail};
+use musubi_core::{Core, PlayerCommand};
+use tokio::net::UnixListener;
+use tokio::process::Command;
 
-use app::{App, Msg, SetupInfo};
+const FRONTEND: &str = "musubi-tui";
+const FRONTEND_ENV: &str = "MUSUBI_TUI_BIN";
+const SOCKET_ENV: &str = "MUSUBI_RPC_SOCKET";
+
+fn find_in_path(name: &str, path: Option<std::ffi::OsString>) -> Option<PathBuf> {
+    std::env::split_paths(&path?)
+        .map(|dir| dir.join(name))
+        .find(|candidate| candidate.is_file())
+}
+
+/// Sucht das Frontend: Umgebungsvariable, neben dem laufenden Programm, dann im `PATH`.
+fn find_frontend(
+    override_path: Option<PathBuf>,
+    executable: Option<&Path>,
+    path: Option<std::ffi::OsString>,
+) -> Option<PathBuf> {
+    override_path
+        .filter(|p| p.is_file())
+        .or_else(|| {
+            let sibling = executable?.parent()?.join(FRONTEND);
+            sibling.is_file().then_some(sibling)
+        })
+        .or_else(|| find_in_path(FRONTEND, path))
+}
 
 /// Startet die TUI und kehrt beim Beenden zurück.
 pub async fn run(core: Core) -> Result<()> {
-    let mut terminal = ratatui::init();
-    let picker = core.config().tui.posters.then(choose_picker);
-    let result = event_loop(&mut terminal, core, picker).await;
-    ratatui::restore();
-    result
-}
+    let executable = std::env::current_exe().ok();
+    let frontend = find_frontend(
+        std::env::var_os(FRONTEND_ENV).map(PathBuf::from),
+        executable.as_deref(),
+        std::env::var_os("PATH"),
+    )
+    .with_context(|| {
+        format!("could not find the `{FRONTEND}` program, build it with `bun run build` in tui/")
+    })?;
 
-/// Wählt das Grafikprotokoll für Poster.
-///
-/// Die Abfrage von `ratatui-image` lässt bei Terminals ohne Antwort einen Thread in `stdin`
-/// zurück, der die nächste Eingabe verschluckt und danach den Raw-Modus abschaltet. Deshalb
-/// wird nur gefragt, wo eine Antwort sicher kommt. Sonst dienen Halbblöcke als Darstellung.
-fn choose_picker() -> Picker {
-    if terminal_answers_queries(
-        |name| std::env::var_os(name).is_some(),
-        |name| std::env::var(name).ok(),
-    ) {
-        Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks())
-    } else {
-        Picker::halfblocks()
-    }
-}
+    // Das Verzeichnis gehört nur dem Nutzer, damit niemand sonst den Socket erreicht.
+    let dir = tempfile::Builder::new()
+        .prefix("musubi-rpc-")
+        .tempdir()
+        .context("could not create the socket directory")?;
+    let socket = dir.path().join("rpc.sock");
+    let listener = UnixListener::bind(&socket).context("could not open the local socket")?;
+    let mut child = Command::new(&frontend)
+        .env(SOCKET_ENV, &socket)
+        .kill_on_drop(true)
+        .spawn()
+        .with_context(|| format!("could not start {}", frontend.display()))?;
 
-fn terminal_answers_queries(
-    is_set: impl Fn(&str) -> bool,
-    value: impl Fn(&str) -> Option<String>,
-) -> bool {
-    const MARKERS: [&str; 4] = [
-        "KITTY_WINDOW_ID",
-        "GHOSTTY_RESOURCES_DIR",
-        "WEZTERM_PANE",
-        "KONSOLE_VERSION",
-    ];
-    const TERMS: [&str; 3] = ["xterm-kitty", "xterm-ghostty", "foot"];
-    const PROGRAMS: [&str; 3] = ["WezTerm", "ghostty", "iTerm.app"];
-    MARKERS.iter().any(|name| is_set(name))
-        || value("TERM").is_some_and(|t| TERMS.iter().any(|known| t.starts_with(known)))
-        || value("TERM_PROGRAM").is_some_and(|p| PROGRAMS.contains(&p.as_str()))
-}
-
-async fn event_loop(
-    terminal: &mut ratatui::DefaultTerminal,
-    core: Core,
-    picker: Option<Picker>,
-) -> Result<()> {
-    let (tx, mut rx) = mpsc::unbounded_channel::<Msg>();
-    let mut core_events = core.subscribe();
-    let mut keys = EventStream::new();
-    let mut tick = tokio::time::interval(Duration::from_millis(200));
-
-    let config = core.config();
-    let mut app = App::new(keys::Keymap::with_overrides(&config.tui.keys), picker);
-    app.setup_info = SetupInfo {
-        jellyfin_url: config.jellyfin.url.clone(),
-        client_id: config.anilist.client_id.clone().unwrap_or_default(),
-        redirect: oauth::loopback_redirect(config.anilist.loopback_port),
-        auto_sync: config.sync.auto_sync,
-    };
-    let initial = app.startup(&core.auth_status());
-    if core.setup_needed() {
-        app.begin_setup();
-    }
-    effects::spawn_all(&core, &tx, initial);
-
-    loop {
-        terminal.draw(|frame| view::draw(frame, &mut app))?;
-        let effects = tokio::select! {
-            event = keys.next() => match event {
-                Some(Ok(Event::Key(key))) if key.kind != KeyEventKind::Release => app.on_key(key),
-                Some(Err(error)) => return Err(error.into()),
-                None => break,
-                _ => vec![],
-            },
-            Some(message) = rx.recv() => app.on_msg(message),
-            event = core_events.recv() => match event {
-                Ok(event) => app.on_core_event(event),
-                Err(broadcast::error::RecvError::Lagged(_)) => vec![],
-                Err(broadcast::error::RecvError::Closed) => break,
-            },
-            _ = tick.tick() => app.on_tick(),
-        };
-        effects::spawn_all(&core, &tx, effects);
-        if app.should_quit {
-            break;
+    let server = {
+        let core = core.clone();
+        async move {
+            let (stream, _) = listener.accept().await?;
+            rpc::serve(core, stream).await
         }
-    }
+    };
+    let status = tokio::select! {
+        status = child.wait() => status?,
+        served = server => {
+            served.context("connection to the terminal interface failed")?;
+            child.wait().await?
+        }
+    };
     let _ = core.player_command(PlayerCommand::Stop).await;
+    if !status.success() {
+        bail!("the terminal interface exited with {status}");
+    }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::terminal_answers_queries;
-
-    fn check(vars: &[(&str, &str)]) -> bool {
-        terminal_answers_queries(
-            |name| vars.iter().any(|(k, _)| *k == name),
-            |name| {
-                vars.iter()
-                    .find(|(k, _)| *k == name)
-                    .map(|(_, v)| (*v).to_owned())
-            },
-        )
-    }
+    use super::*;
 
     #[test]
-    fn only_known_terminals_are_queried() {
-        assert!(check(&[("KONSOLE_VERSION", "250800")]));
-        assert!(check(&[("TERM", "xterm-kitty")]));
-        assert!(check(&[("TERM", "foot-extra")]));
-        assert!(check(&[("TERM_PROGRAM", "WezTerm")]));
-        assert!(!check(&[("TERM", "xterm-256color")]));
-        assert!(!check(&[]));
+    fn frontend_lookup_prefers_override_then_sibling_then_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let (bin, other) = (dir.path().join("bin"), dir.path().join("other"));
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(&other).unwrap();
+        let sibling = bin.join(FRONTEND);
+        let in_path = other.join(FRONTEND);
+        let custom = dir.path().join("custom");
+        for file in [&sibling, &in_path, &custom] {
+            std::fs::write(file, "").unwrap();
+        }
+        let exe = bin.join("musubi");
+        let path = Some(other.clone().into_os_string());
+
+        assert_eq!(
+            find_frontend(Some(custom.clone()), Some(&exe), path.clone()),
+            Some(custom)
+        );
+        assert_eq!(
+            find_frontend(None, Some(&exe), path.clone()),
+            Some(sibling.clone())
+        );
+        std::fs::remove_file(&sibling).unwrap();
+        assert_eq!(find_frontend(None, Some(&exe), path), Some(in_path));
+        assert_eq!(find_frontend(None, Some(&exe), None), None);
     }
 }

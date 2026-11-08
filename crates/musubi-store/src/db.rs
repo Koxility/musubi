@@ -76,7 +76,7 @@ pub enum OutboxOp {
     Delete { entry_id: i64 },
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct OutboxItem {
     pub media_id: i64,
     pub op: OutboxOp,
@@ -97,14 +97,14 @@ pub struct ReviewCandidate {
 }
 
 /// Serie ohne sichere automatische Zuordnung.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ReviewItem {
     pub jellyfin_id: String,
     pub title: String,
     pub candidates: Vec<ReviewCandidate>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SyncLogEntry {
     pub at: i64,
     pub ok: bool,

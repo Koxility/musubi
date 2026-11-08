@@ -13,7 +13,7 @@ workspace = true
 musubi-core.workspace = true
 musubi-store.workspace = true
 musubi-tui = { workspace = true, optional = true }
-musubi-gtk = { workspace = true, optional = true }
+musubi-gui = { workspace = true, optional = true }
 tokio.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
@@ -25,5 +25,5 @@ secrecy.workspace = true
 
 [features]
 default = ["gui", "tui"]
-gui = ["dep:musubi-gtk"]
+gui = ["dep:musubi-gui"]
 tui = ["dep:musubi-tui"]

@@ -8,6 +8,7 @@ fragment MediaFields on Media {
   coverImage { large }
   description(asHtml: false)
   genres averageScore
+  nextAiringEpisode { airingAt episode }
 }";
 
 pub const ENTRY_FIELDS: &str = "

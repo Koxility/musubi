@@ -14,13 +14,12 @@ musubi-domain.workspace = true
 musubi-core.workspace = true
 musubi-store.workspace = true
 tokio.workspace = true
-futures.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
-ratatui.workspace = true
-crossterm.workspace = true
-nucleo-matcher.workspace = true
-chrono.workspace = true
-ratatui-image.workspace = true
-image.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 secrecy.workspace = true
+tempfile.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
