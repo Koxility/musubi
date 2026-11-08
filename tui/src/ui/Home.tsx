@@ -15,7 +15,7 @@ function ShelfLine({ item, selected }: { item: ShelfItem; selected: boolean }) {
   const progress = progressOf(item);
   return (
     <Box backgroundColor={selected ? SELECTED : undefined} columnGap={1} flexGrow={1}>
-      <Box flexGrow={1} flexShrink={1} flexBasis={0}>
+      <Box flexGrow={1} flexShrink={1} flexBasis={0} paddingRight={1}>
         <Text wrap="truncate-end" bold={selected}>{item.title}</Text>
       </Box>
       <Box width={22} flexShrink={0}>

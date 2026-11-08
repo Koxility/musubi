@@ -19,7 +19,7 @@ function OverviewLine({ entry, selected, now }: { entry: ListRow; selected: bool
   const next = entry.media.next_airing;
   return (
     <Box backgroundColor={selected ? SELECTED : undefined} columnGap={1} flexGrow={1}>
-      <Box flexGrow={1} flexShrink={1} flexBasis={0}>
+      <Box flexGrow={1} flexShrink={1} flexBasis={0} paddingRight={1}>
         <Text wrap="truncate-end" bold={selected}>{preferredTitle(entry.media.title)}</Text>
       </Box>
       <Box width={18} flexShrink={0}>
@@ -36,7 +36,7 @@ function OverviewLine({ entry, selected, now }: { entry: ListRow; selected: bool
 function ListLine({ entry, selected }: { entry: ListRow; selected: boolean }) {
   return (
     <Box backgroundColor={selected ? SELECTED : undefined} columnGap={1}>
-      <Box flexGrow={1} flexShrink={1} flexBasis={0}>
+      <Box flexGrow={1} flexShrink={1} flexBasis={0} paddingRight={1}>
         <Text wrap="truncate-end" bold={selected}>{preferredTitle(entry.media.title)}</Text>
       </Box>
       <Box width={11} flexShrink={0}>

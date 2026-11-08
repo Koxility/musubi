@@ -18,7 +18,7 @@ function LibraryLine({ row, selected }: { row: LibraryRow; selected: boolean }) 
       <Box width={1} flexShrink={0}>
         <Text color="yellow">{row.needs_review ? '!' : ' '}</Text>
       </Box>
-      <Box flexGrow={1} flexShrink={1} flexBasis={0}>
+      <Box flexGrow={1} flexShrink={1} flexBasis={0} paddingRight={1}>
         <Text wrap="truncate-end" bold={selected}>{row.item.name}</Text>
       </Box>
       <Box width={4} flexShrink={0}><Text color={MUTED}>{row.item.year ?? ''}</Text></Box>
@@ -55,7 +55,7 @@ function EpisodeLine({ row, selected }: { row: EpisodeRow; selected: boolean }) 
       <Box width={8} flexShrink={0}>
         <Text color={MUTED}>S{episode.season_number}E{String(episode.number).padStart(2, '0')}</Text>
       </Box>
-      <Box flexGrow={1} flexShrink={1} flexBasis={0}>
+      <Box flexGrow={1} flexShrink={1} flexBasis={0} paddingRight={1}>
         <Text wrap="truncate-end" bold={selected}>{episode.name}</Text>
       </Box>
       <Box width={7} flexShrink={0}>

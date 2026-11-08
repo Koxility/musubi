@@ -8,7 +8,7 @@ import { ACCENT, Empty, MUTED, Panel, SELECTED, WIDE_LAYOUT, Window } from './co
 function ReviewLine({ review, selected }: { review: ReviewItem; selected: boolean }) {
   return (
     <Box backgroundColor={selected ? SELECTED : undefined} columnGap={1}>
-      <Box flexGrow={1} flexShrink={1} flexBasis={0}>
+      <Box flexGrow={1} flexShrink={1} flexBasis={0} paddingRight={1}>
         <Text wrap="truncate-end" bold={selected}>{review.title}</Text>
       </Box>
       <Text color={MUTED}>{review.candidates.length} candidates</Text>
@@ -21,7 +21,7 @@ function MappedLine({ mapping, selected }: { mapping: Mapping; selected: boolean
   const offset = mapping.offset >= 0 ? `+${mapping.offset}` : String(mapping.offset);
   return (
     <Box backgroundColor={selected ? SELECTED : undefined} columnGap={1}>
-      <Box flexGrow={1} flexShrink={1} flexBasis={0}>
+      <Box flexGrow={1} flexShrink={1} flexBasis={0} paddingRight={1}>
         <Text wrap="truncate-end" bold={selected}>{mapping.title}</Text>
       </Box>
       <Text color={MUTED}>{range} ({offset})</Text>
@@ -65,7 +65,7 @@ function DiffLine({ row, selected }: { row: SyncRow; selected: boolean }) {
   const [label, color] = ARROWS[row.direction];
   return (
     <Box backgroundColor={selected ? SELECTED : undefined} columnGap={1}>
-      <Box flexGrow={1} flexShrink={1} flexBasis={0}>
+      <Box flexGrow={1} flexShrink={1} flexBasis={0} paddingRight={1}>
         <Text wrap="truncate-end" bold={selected}>{row.media_title}</Text>
       </Box>
       <Box width={16} flexShrink={0}>
