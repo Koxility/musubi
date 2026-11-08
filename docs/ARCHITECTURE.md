@@ -1,0 +1,117 @@
+# Architektur
+
+## Aufbau
+
+```
+                 musubi (Binary: clap, Logging, Start)
+                   │                      │
+             musubi-tui              musubi-gtk
+           (ratatui, Elm-Muster)    (relm4, libadwaita)
+                   └──────────┬───────────┘
+                         musubi-core
+        Fassade · Matching · Sync-Regeln · Outbox · Wiedergabe
+          │             │              │             │
+   musubi-jellyfin  musubi-anilist  musubi-player  musubi-store
+    REST-Client     GraphQL, OAuth,  PlayerBackend  Config, Secrets,
+                    Rate-Limiter     mpv-IPC        SQLite
+          └─────────────┴──────┬───────┴─────────────┘
+                         musubi-domain
+                     reine Typen, kein IO
+```
+
+Die Abhängigkeiten zeigen nur nach unten, und der Compiler erzwingt das über die Crate-Grenzen. Die Oberflächen hängen nur am Kern und kennen weder HTTP noch mpv. Im Workspace gilt `unsafe_code = "forbid"`.
+
+### Vertrag zwischen Kern und Oberflächen
+
+`Core` ist billig klonbar und bietet typisierte async-Methoden, dazu `subscribe()` für Ereignisse wie Wiedergabefortschritt, geänderte Listen oder Rate-Limits. Beide Oberflächen sprechen ausschließlich mit dieser Schnittstelle. Funktionen entstehen dadurch einmal im Kern und nicht pro Oberfläche.
+
+## Technologie-Entscheidungen
+
+### GUI: GTK4 und libadwaita über relm4
+
+Eine Bibliothek kann schnell viele tausend Poster enthalten. `GtkGridView` virtualisiert sie von Haus aus. GTK bringt außerdem Eingabemethoden für japanische Titel, Barrierefreiheit und ausgereifte Wayland- und X11-Unterstützung mit. iced wäre reiner Rust-Code, hat aber keine virtualisierten Raster. Der Preis: Auf KDE sieht die App nach GNOME aus.
+
+### TUI: ratatui
+
+Der Zustand liegt in `App`. Tasten und Ergebnisse ändern ihn und liefern `Effect`-Werte, nur `effects.rs` spricht mit dem Kern. So lässt sich die gesamte Bedienlogik ohne Terminal und Netz testen. Poster laufen über Kitty oder Sixel. Abgefragt werden nur Terminals, die sicher antworten, weil die Abfrage von `ratatui-image` bei stummen Terminals Eingaben verschluckt und den Raw-Modus abschaltet. Alle anderen nutzen Halbblöcke.
+
+### Player: mpv als Prozess über JSON-IPC
+
+Hardware-Decoding, ASS-Untertitel und Wayland/X11 kommen fertig von mpv, und deine `mpv.conf` gilt weiter. Ein Absturz des Players reißt die App nicht mit, es gibt kein FFI und GUI und TUI funktionieren gleich. Der Preis ist das eigene Fenster. Der Trait `PlayerBackend` ist der Austauschpunkt für eine spätere Einbettung.
+
+### Persistenz: SQLite auf eigenem Thread
+
+Zuordnungen und Warteschlange müssen Abstürze überleben. rusqlite ist synchron, deshalb gehört die Verbindung einem eigenen Thread, und async-Code schickt ihm Aufträge.
+
+### GraphQL: handgeschriebene Queries
+
+Rund ein Dutzend Operationen rechtfertigen keinen Codegen-Schritt samt eingechecktem Schema.
+
+## Abläufe
+
+### Wiedergabe
+
+1. `PlaybackInfo` liefert Direct Stream oder Transcoding-URL. Das Geräteprofil erlaubt alles, weil mpv praktisch jedes Format abspielt.
+2. mpv startet ohne Zugangsdaten. Der Auth-Header wird danach per IPC gesetzt, das Token erscheint also nie in `argv` oder `ps`.
+3. Fortschritt geht alle 10 s sowie bei Pause und Seek an Jellyfin. mpv bekommt die Folgeepisode, sobald die aktuelle läuft, damit `<` und `>` funktionieren.
+4. Ab der Schwelle (Standard 85 %) oder bei Dateiende greifen die Sync-Regeln.
+
+### Matching
+
+1. Eine manuelle Zuordnung gewinnt immer.
+2. `ProviderIds`: AniList direkt, MyAnimeList über `Media(idMal:)`.
+3. Titelsuche mit Normalisierung und Jaro-Winkler über alle Titel und Synonyme, dazu Bonus oder Abzug für Jahr, Format und Episodenzahl. Automatisch übernommen wird ab 0.92 und mit mindestens 0.05 Abstand zum Zweitplatzierten.
+4. Alles andere landet mit Kandidaten auf der Prüfliste.
+
+AniList zählt pro Werk, oft pro Cour, Jellyfin pro Staffel. `plan_chain` folgt daher den `SEQUEL`-Relationen und verteilt Staffeln auf Werke. Das deckt eine Staffel über mehrere Cours ebenso ab wie ein Werk über mehrere Staffeln und absolute Nummerierung. Jede Zuordnung gilt für einen Episodenbereich und trägt einen Offset.
+
+### Sync-Regeln
+
+`sync::decide_watched` ist eine reine Funktion und tabellarisch getestet.
+
+| AniList-Status | gesehene Episode | Ergebnis |
+|---|---|---|
+| kein Eintrag, `PLANNING` | beliebig | `CURRENT` mit `startedAt` |
+| kein Eintrag, `PLANNING`, `CURRENT` | letzte | `COMPLETED` mit `completedAt` |
+| `CURRENT` | höher als Fortschritt | Fortschritt steigt |
+| `CURRENT`, `REPEATING` | nicht höher | nichts |
+| `REPEATING` | letzte | `COMPLETED`, `repeat` + 1 |
+| `PAUSED`, `DROPPED` | beliebig | nichts, Meldung als Konflikt |
+| `COMPLETED` | beliebig | nichts |
+
+Automatisch läuft der Sync nur von Jellyfin nach AniList, damit keine Schleifen entstehen. Der manuelle Abgleich zeigt pro Abweichung eine Richtung, die du ändern kannst.
+
+### Outbox
+
+Jeder Schreibzugriff auf AniList geht zuerst in die SQLite-Tabelle `outbox`, die Anzeige aktualisiert sich sofort. Pro Werk gibt es einen Auftrag, neuere Änderungen werden hineingemischt. Eine Revisionsnummer verhindert, dass ein gerade gesendeter Auftrag eine währenddessen eingegangene Änderung löscht. Vorübergehende Fehler werden mit Backoff wiederholt, bis maximal eine Stunde Abstand. Dauerhafte Fehler bleiben als fehlgeschlagen sichtbar und lassen sich neu anstoßen.
+
+Der Rate-Limiter startet mit dem gemessenen Limit von 30 Anfragen pro Minute, übernimmt `X-RateLimit-Limit` aus jeder Antwort und beachtet `Retry-After`.
+
+## Sicherheit
+
+- Standardablage ist `credentials.toml` mit 0600 in einem 0700-Verzeichnis, atomar geschrieben. Zu offene Rechte führen zum Abbruch. Secret Service ist per Konfiguration wählbar.
+- Passwörter werden nie gespeichert. Tokens liegen im Speicher als `SecretString` und tauchen nicht in Logs auf.
+- Der AniList-Login nutzt den Implicit Grant, also kein Client-Secret. Der Loopback-Server hört nur auf 127.0.0.1, prüft den Host-Header, nutzt einen zufälligen Pfad pro Login und nimmt das Token erst nach Prüfung per `Viewer` an.
+- Der mpv-Socket liegt in einem 0700-Verzeichnis unter `$XDG_RUNTIME_DIR`.
+
+## Bekannte Limitationen
+
+- mpv läuft in einem eigenen Fenster, in der GUI ist das Video nicht eingebettet.
+- Ob transkodiert wird, entscheidet der Server. Eigene Profile gibt es nicht, nur `max_bitrate`.
+- Es gibt keinen Offline-Download, ohne Server läuft nur die AniList-Verwaltung über den Cache.
+- Kein automatischer Sync von AniList nach Jellyfin, nur manuell.
+- AniList-Tokens müssen jährlich erneuert werden.
+- Provider-IDs von AniDB und TVDB werden nicht ausgewertet, AniList bietet dafür keine direkte Suche. Specials (Staffel 0) werden nur manuell zugeordnet.
+- Mit dem aktuellen Limit von 30 Anfragen pro Minute dauert die erste Zuordnung einer großen Bibliothek spürbar, weil jeder Titel eine bis mehrere Anfragen braucht.
+- Eigene CA-Zertifikate kommen ausschließlich aus dem System-Store.
+- Umbenennen einer Custom List ist bei AniList nicht atomar. Bricht der Vorgang ab, existieren beide Listen.
+- Die Oberflächen sind nur auf Englisch.
+
+## Mögliche Erweiterungen
+
+- Eingebettetes Video über libmpv und `GtkGLArea` als weiteres `PlayerBackend`.
+- Quick Connect als dritte Jellyfin-Anmeldung.
+- Offline-Modus mit Downloads.
+- Weitere Tracker wie MyAnimeList oder Kitsu über einen `Tracker`-Trait.
+- Benachrichtigungen für neue Episoden über die Airing-Daten von AniList.
+- Eine Oberfläche für Qt, falls die native Optik auf KDE wichtiger wird.

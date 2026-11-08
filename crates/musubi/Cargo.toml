@@ -1,0 +1,29 @@
+[package]
+name = "musubi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+musubi-core.workspace = true
+musubi-store.workspace = true
+musubi-tui = { workspace = true, optional = true }
+musubi-gtk = { workspace = true, optional = true }
+tokio.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-appender.workspace = true
+clap.workspace = true
+rpassword.workspace = true
+secrecy.workspace = true
+
+[features]
+default = ["gui", "tui"]
+gui = ["dep:musubi-gtk"]
+tui = ["dep:musubi-tui"]

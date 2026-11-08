@@ -1,0 +1,81 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "GPL-3.0-or-later"
+publish = false
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[workspace.dependencies]
+# Interne Crates
+musubi-domain = { path = "crates/musubi-domain" }
+musubi-jellyfin = { path = "crates/musubi-jellyfin" }
+musubi-anilist = { path = "crates/musubi-anilist" }
+musubi-player = { path = "crates/musubi-player" }
+musubi-store = { path = "crates/musubi-store" }
+musubi-core = { path = "crates/musubi-core" }
+musubi-tui = { path = "crates/musubi-tui" }
+musubi-gtk = { path = "crates/musubi-gtk" }
+
+# Async
+tokio = { version = "1.54", features = ["rt-multi-thread", "macros", "net", "process", "sync", "time", "signal", "io-util", "fs"] }
+futures = "0.3"
+async-trait = "0.1"
+
+# HTTP und Serialisierung
+reqwest = { version = "0.13", features = ["json", "query"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.9"
+url = "2.5"
+base64 = "0.22"
+
+# Fehler und Logging
+thiserror = "2"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+
+# Persistenz und Secrets
+secrecy = "0.10"
+keyring-core = "1"
+zbus-secret-service-keyring-store = { version = "1", features = ["rt-tokio-crypto-rust"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite_migration = "2.6"
+directories = "6"
+
+# Sonstiges
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+strsim = "0.11"
+clap = { version = "4.6", features = ["derive"] }
+open = "5.4"
+rpassword = "7"
+
+# TUI
+ratatui = "0.30"
+crossterm = { version = "0.29", features = ["event-stream"] }
+nucleo-matcher = "0.3"
+ratatui-image = { version = "11", default-features = false, features = ["crossterm"] }
+image = "0.25"
+
+# GUI (gtk und adw kommen über die Re-Exporte von relm4)
+relm4 = { version = "0.11", features = ["libadwaita", "gnome_48"] }
+
+# Tests
+wiremock = "0.6"
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
+strip = true

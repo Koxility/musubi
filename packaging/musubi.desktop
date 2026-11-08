@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Musubi
+Comment=Stream anime from Jellyfin and manage your AniList
+Exec=musubi gui
+Icon=musubi
+Terminal=false
+Categories=AudioVideo;Video;Player;
+Keywords=anime;jellyfin;anilist;
+StartupWMClass=io.github.musubi.Musubi
