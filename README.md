@@ -59,9 +59,11 @@ install -Dm644 packaging/musubi.svg ~/.local/share/icons/hicolor/scalable/apps/m
 
 ## Einrichtung
 
+Beim ersten Start führt dich Musubi Schritt für Schritt durch Jellyfin, AniList und die Sync-Einstellung. Jeder Schritt lässt sich überspringen. Solange die Einrichtung nicht abgeschlossen ist und ein Login fehlt, erscheint sie beim nächsten Start wieder. Später startest du sie in der GUI unter *Settings* mit *Run setup* und in der TUI mit `:setup` erneut.
+
 ### Jellyfin
 
-In der GUI unter *Settings*, in der TUI im Login-Dialog (öffnet sich beim ersten Start, sonst `:login`) oder per Kommandozeile:
+Im Setup, in der GUI unter *Settings*, in der TUI im Login-Dialog (`:login`) oder per Kommandozeile:
 
 ```bash
 musubi login jellyfin
@@ -75,7 +77,7 @@ Musubi enthält bewusst keine fest eingebaute App-Kennung.
 
 1. Lege unter <https://anilist.co/settings/developer> eine Anwendung an.
 2. Trage als Redirect-URL `http://127.0.0.1:47823/callback` ein.
-3. Melde dich an und gib dabei die Client-ID an:
+3. Gib die Client-ID im Setup ein oder melde dich per Kommandozeile an. Das Client-Secret braucht Musubi nicht:
 
 ```bash
 musubi login anilist
@@ -173,7 +175,7 @@ musubi sync
 | `v` `b` | Untertitel, Tonspur |
 | `?` | Hilfe |
 
-Die Befehlszeile `:` kennt `:status completed`, `:score 8.5`, `:progress 7`, `:notes Text`, `:private on|off`, `:list-create Name`, `:list-delete Name`, `:list-rename Alt -> Neu`, `:sync`, `:match`, `:flush`, `:login [anilist]` und `:logout jellyfin|anilist`.
+Die Befehlszeile `:` kennt `:status completed`, `:score 8.5`, `:progress 7`, `:notes Text`, `:private on|off`, `:list-create Name`, `:list-delete Name`, `:list-rename Alt -> Neu`, `:sync`, `:match`, `:flush`, `:setup`, `:login [anilist]` und `:logout jellyfin|anilist`.
 
 Alle Aktionsnamen für `[tui.keys]` stehen in `crates/musubi-tui/src/keys.rs`.
 

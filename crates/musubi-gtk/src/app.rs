@@ -20,6 +20,7 @@ use crate::list::{self, AddDialog, ListPage};
 use crate::mapping::{self, MappingPage};
 use crate::player::PlayerBar;
 use crate::settings::SettingsPage;
+use crate::setup::SetupDialog;
 use crate::sync::SyncPage;
 use crate::util::{self, MarginExt, task};
 
@@ -79,6 +80,11 @@ pub enum Msg {
     LogoutJellyfin,
     LogoutAniList,
     SaveSettings,
+    // Einrichtung
+    OpenSetup,
+    SetupBack,
+    SetupNext,
+    SetupClosed,
     Player(PlayerCommand),
 }
 
@@ -113,6 +119,7 @@ pub struct App {
     settings: SettingsPage,
     player: PlayerBar,
     add_dialog: Option<AddDialog>,
+    setup: Option<SetupDialog>,
     items: HashMap<String, LibraryItem>,
     reviews: Vec<ReviewItem>,
     mappings: Vec<Mapping>,
@@ -484,6 +491,7 @@ impl Component for App {
             settings,
             player,
             add_dialog: None,
+            setup: None,
             items: HashMap::new(),
             reviews: vec![],
             mappings: vec![],
@@ -495,6 +503,9 @@ impl Component for App {
             sender.input(Msg::Navigate(SETTINGS_PAGE));
         } else {
             sender.input(Msg::Navigate(0));
+        }
+        if model.core.setup_needed() {
+            sender.input(Msg::OpenSetup);
         }
         model.show_list();
         let cached = model.core.clone();
@@ -516,7 +527,7 @@ impl Component for App {
         &mut self,
         message: Msg,
         sender: ComponentSender<Self>,
-        _root: &adw::ApplicationWindow,
+        root: &adw::ApplicationWindow,
     ) {
         match message {
             Msg::Navigate(page) => {
@@ -765,6 +776,35 @@ impl Component for App {
                     Err(error) => self.toast(&error.to_string()),
                 }
             }
+            Msg::OpenSetup => {
+                if self.setup.is_none() {
+                    let auth = self.core.auth_status();
+                    self.setup = Some(SetupDialog::open(&self.core.config(), &auth, &sender, root));
+                }
+            }
+            Msg::SetupBack => {
+                if let Some(setup) = &self.setup {
+                    setup.go_back();
+                }
+            }
+            Msg::SetupNext => {
+                if let Some(setup) = &self.setup
+                    && setup.advance()
+                {
+                    let auto_sync = setup.auto_sync();
+                    match self.core.update_config(|c| c.sync.auto_sync = auto_sync) {
+                        Ok(()) => setup.close(),
+                        Err(error) => setup.show_error(&error.to_string()),
+                    }
+                }
+            }
+            Msg::SetupClosed => {
+                self.setup = None;
+                if let Err(error) = self.core.update_config(|c| c.ui.setup_completed = true) {
+                    self.toast(&error.to_string());
+                }
+                self.settings.load(&self.core.config());
+            }
             Msg::Player(command) => {
                 let core = self.core.clone();
                 self.done(&sender, async move { core.player_command(command).await });
@@ -828,8 +868,14 @@ impl Component for App {
             Cmd::LoggedIn(Ok(name)) => {
                 self.toast(&format!("Done: {name}"));
                 self.after_login(&sender);
+                if let Some(setup) = &self.setup {
+                    setup.logged_in(&self.core.auth_status());
+                }
             }
-            Cmd::LoggedIn(Err(error)) => self.toast(&error),
+            Cmd::LoggedIn(Err(error)) => match &self.setup {
+                Some(setup) => setup.show_error(&error),
+                None => self.toast(&error),
+            },
             Cmd::Done(result) => self.report(result),
         }
     }

@@ -687,7 +687,8 @@ fn centered(area: Rect, width: u16, height: u16) -> Rect {
 }
 
 fn draw_form(frame: &mut Frame<'_>, form: &Form) {
-    let hint_height = u16::from(form.hint.as_ref().is_some_and(|h| !h.is_empty())) * 2;
+    let hint_lines = form.hint.as_deref().map_or(0, |h| h.lines().count()) as u16;
+    let hint_height = if hint_lines > 0 { hint_lines + 1 } else { 0 };
     let height = form.fields.len() as u16 + 4 + hint_height + u16::from(form.error.is_some());
     let area = centered(frame.area(), 72, height);
     frame.render_widget(Clear, area);
@@ -729,7 +730,7 @@ fn draw_form(frame: &mut Frame<'_>, form: &Form) {
     }
     if let Some(hint) = form.hint.as_ref().filter(|h| !h.is_empty()) {
         lines.push(Line::default());
-        lines.push(Line::from(hint.clone()).dim());
+        lines.extend(hint.lines().map(|line| Line::from(line.to_owned()).dim()));
     }
     let block = Block::bordered()
         .title(format!(" {} ", form.title))
@@ -764,6 +765,7 @@ const HELP: &[(&str, &str)] = &[
     (":list-create NAME", "new custom list"),
     (":list-delete NAME", "remove custom list"),
     (":list-rename A -> B", "rename custom list"),
+    (":setup", "guided setup"),
     (":login [anilist]", "log in"),
     (":logout jellyfin|anilist", "log out"),
     (":sync :flush :match", "compare, retry queue, match"),

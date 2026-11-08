@@ -318,11 +318,49 @@ impl Core {
         }
     }
 
+    /// Ob die geführte Einrichtung beim Start von selbst erscheinen soll.
+    pub fn setup_needed(&self) -> bool {
+        setup_needed(&self.config(), &self.auth_status())
+    }
+
     pub fn viewer(&self) -> Option<Viewer> {
         self.inner.viewer()
     }
 
     pub async fn sync_log(&self, limit: u32) -> Result<Vec<musubi_store::SyncLogEntry>> {
         Ok(self.inner.db.sync_log(limit).await?)
+    }
+}
+
+fn setup_needed(config: &Config, auth: &AuthStatus) -> bool {
+    !config.ui.setup_completed && (auth.jellyfin_user.is_none() || !auth.anilist_logged_in)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn auth(jellyfin: bool, anilist: bool) -> AuthStatus {
+        AuthStatus {
+            jellyfin_user: jellyfin.then(|| "user".to_owned()),
+            anilist_logged_in: anilist,
+            ..AuthStatus::default()
+        }
+    }
+
+    #[test]
+    fn setup_appears_while_a_login_is_missing() {
+        let config = Config::default();
+        assert!(setup_needed(&config, &auth(false, false)));
+        assert!(setup_needed(&config, &auth(true, false)));
+        assert!(setup_needed(&config, &auth(false, true)));
+        assert!(!setup_needed(&config, &auth(true, true)));
+    }
+
+    #[test]
+    fn finished_setup_never_returns_by_itself() {
+        let mut config = Config::default();
+        config.ui.setup_completed = true;
+        assert!(!setup_needed(&config, &auth(false, false)));
     }
 }

@@ -15,11 +15,11 @@ use std::time::Duration;
 use anyhow::Result;
 use crossterm::event::{Event, EventStream, KeyEventKind};
 use futures::StreamExt;
-use musubi_core::{Core, PlayerCommand};
+use musubi_core::{Core, PlayerCommand, oauth};
 use ratatui_image::picker::Picker;
 use tokio::sync::{broadcast, mpsc};
 
-use app::{App, Msg};
+use app::{App, Msg, SetupInfo};
 
 /// Startet die TUI und kehrt beim Beenden zurück.
 pub async fn run(core: Core) -> Result<()> {
@@ -75,7 +75,16 @@ async fn event_loop(
 
     let config = core.config();
     let mut app = App::new(keys::Keymap::with_overrides(&config.tui.keys), picker);
+    app.setup_info = SetupInfo {
+        jellyfin_url: config.jellyfin.url.clone(),
+        client_id: config.anilist.client_id.clone().unwrap_or_default(),
+        redirect: oauth::loopback_redirect(config.anilist.loopback_port),
+        auto_sync: config.sync.auto_sync,
+    };
     let initial = app.startup(&core.auth_status());
+    if core.setup_needed() {
+        app.begin_setup();
+    }
     effects::spawn_all(&core, &tx, initial);
 
     loop {

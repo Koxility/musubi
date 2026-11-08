@@ -23,18 +23,50 @@ pub struct SettingsPage {
     autoplay: adw::SwitchRow,
 }
 
-fn button_row(group: &adw::PreferencesGroup, label: &str, on_click: impl Fn() + 'static) {
+pub fn button_row(
+    group: &adw::PreferencesGroup,
+    label: &str,
+    on_click: impl Fn() + 'static,
+) -> gtk::Button {
     let row = adw::ActionRow::new();
     let button = gtk::Button::with_label(label);
     button.set_valign(gtk::Align::Center);
     button.connect_clicked(move |_| on_click());
     row.add_suffix(&button);
     group.add(&row);
+    button
+}
+
+pub fn jellyfin_status_text(auth: &AuthStatus) -> String {
+    match (&auth.jellyfin_user, &auth.jellyfin_url) {
+        (Some(user), Some(url)) => format!("{user} on {url}"),
+        _ => "Not logged in".to_owned(),
+    }
+}
+
+pub fn anilist_status_text(auth: &AuthStatus) -> String {
+    match (&auth.anilist_user, auth.anilist_logged_in) {
+        (Some(user), _) => user.clone(),
+        (None, true) => "Logged in".to_owned(),
+        _ => "Not logged in".to_owned(),
+    }
 }
 
 impl SettingsPage {
     pub fn new(sender: &ComponentSender<App>) -> Self {
         let (page, content) = util::pref_page();
+
+        let setup_group = adw::PreferencesGroup::builder()
+            .title("Setup")
+            .description("Walk through Jellyfin, AniList and sync step by step.")
+            .build();
+        {
+            let input = sender.input_sender().clone();
+            button_row(&setup_group, "Run setup", move || {
+                input.emit(Msg::OpenSetup)
+            });
+        }
+        content.append(&setup_group);
 
         // Jellyfin
         let jellyfin_group = adw::PreferencesGroup::builder().title("Jellyfin").build();
@@ -199,18 +231,9 @@ impl SettingsPage {
     }
 
     pub fn set_auth(&self, auth: &AuthStatus) {
-        let jellyfin = match (&auth.jellyfin_user, &auth.jellyfin_url) {
-            (Some(user), Some(url)) => format!("{user} on {url}"),
-            _ => "Not logged in".to_owned(),
-        };
         self.jellyfin_status
-            .set_subtitle(&gtk::glib::markup_escape_text(&jellyfin));
-        let anilist = match (&auth.anilist_user, auth.anilist_logged_in) {
-            (Some(user), _) => user.clone(),
-            (None, true) => "Logged in".to_owned(),
-            _ => "Not logged in".to_owned(),
-        };
+            .set_subtitle(&gtk::glib::markup_escape_text(&jellyfin_status_text(auth)));
         self.anilist_status
-            .set_subtitle(&gtk::glib::markup_escape_text(&anilist));
+            .set_subtitle(&gtk::glib::markup_escape_text(&anilist_status_text(auth)));
     }
 }

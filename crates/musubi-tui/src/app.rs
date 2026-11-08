@@ -91,6 +91,8 @@ pub enum Effect {
     },
     LoginAniListBrowser(String),
     LoginAniListPin(String),
+    /// Beendet die Einrichtung, optional mit der gewählten Einstellung für Auto-Sync.
+    FinishSetup(Option<bool>),
     LogoutJellyfin,
     LogoutAniList,
     CreateList(MediaKind, String),
@@ -134,6 +136,24 @@ pub enum Purpose {
     EditMapping(Box<Mapping>),
     SearchAdd,
     AddStatus(Box<Media>),
+    SetupSync,
+}
+
+/// Schritte der geführten Einrichtung.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetupStep {
+    Jellyfin,
+    AniList,
+    Sync,
+}
+
+/// Vorbelegung der Einrichtung aus der Konfiguration.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SetupInfo {
+    pub jellyfin_url: Option<String>,
+    pub client_id: String,
+    pub redirect: String,
+    pub auto_sync: bool,
 }
 
 pub enum Modal {
@@ -178,6 +198,8 @@ pub struct App {
     pub rate_limited: Option<Duration>,
     pub match_progress: Option<(usize, usize)>,
     pub modal: Option<Modal>,
+    pub setup: Option<SetupStep>,
+    pub setup_info: SetupInfo,
     pub mode: InputMode,
     pub input: String,
 
@@ -280,6 +302,8 @@ impl App {
             rate_limited: None,
             match_progress: None,
             modal: None,
+            setup: None,
+            setup_info: SetupInfo::default(),
             mode: InputMode::Normal,
             input: String::new(),
             rows: vec![],
@@ -328,7 +352,7 @@ impl App {
                 Effect::LoadLibrary(self.query.clone()),
                 Effect::LoadChoices,
             ]);
-        } else {
+        } else if self.setup.is_none() {
             self.open_jellyfin_login();
         }
         if auth.anilist_logged_in {
@@ -540,6 +564,7 @@ impl App {
                 {
                     self.modal = None;
                 }
+                self.advance_setup_after_login();
                 return effects;
             }
             Msg::Poster(key, image) => {
@@ -674,6 +699,10 @@ impl App {
             "" => vec![],
             "q" | "quit" => {
                 self.should_quit = true;
+                vec![]
+            }
+            "setup" => {
+                self.begin_setup();
                 vec![]
             }
             "login" => {
@@ -1216,7 +1245,7 @@ impl App {
                 vec![]
             }
             Modal::Form(mut form, purpose) => match form.on_key(key) {
-                FormOutcome::Cancel => vec![],
+                FormOutcome::Cancel => self.skip_setup_step(&purpose),
                 FormOutcome::Editing => {
                     self.modal = Some(Modal::Form(form, purpose));
                     vec![]
@@ -1258,12 +1287,116 @@ impl App {
         let form = Form::new(
             "Log in to AniList",
             vec![
-                Field::text("client_id", "Client ID", ""),
+                Field::text("client_id", "Client ID", self.setup_info.client_id.clone()),
                 Field::secret("token", "Token or redirect URL"),
             ],
         )
         .with_hint("Leave the token empty to log in through the browser.");
         self.modal = Some(Modal::Form(Box::new(form), Purpose::LoginAniList));
+    }
+
+    /// Startet die Einrichtung beim ersten fehlenden Login.
+    pub fn begin_setup(&mut self) {
+        let step = if self.auth.jellyfin_user.is_some() && !self.auth.anilist_logged_in {
+            SetupStep::AniList
+        } else {
+            SetupStep::Jellyfin
+        };
+        self.open_setup_step(step);
+    }
+
+    fn open_setup_step(&mut self, step: SetupStep) {
+        self.setup = Some(step);
+        match step {
+            SetupStep::Jellyfin => {
+                let url = self
+                    .auth
+                    .jellyfin_url
+                    .clone()
+                    .or_else(|| self.setup_info.jellyfin_url.clone())
+                    .unwrap_or_default();
+                let form = Form::new(
+                    "Setup 1/3: Jellyfin",
+                    vec![
+                        Field::text("url", "Server URL", url),
+                        Field::text(
+                            "user",
+                            "Username",
+                            self.auth.jellyfin_user.clone().unwrap_or_default(),
+                        ),
+                        Field::secret("password", "Password"),
+                        Field::secret("key", "or API key"),
+                    ],
+                )
+                .with_hint(
+                    "Include the port, for example 192.168.1.10:8096.\n\
+                     The password is used once and never stored. Esc skips this step.",
+                );
+                self.modal = Some(Modal::Form(Box::new(form), Purpose::LoginJellyfin));
+            }
+            SetupStep::AniList => {
+                let form = Form::new(
+                    "Setup 2/3: AniList",
+                    vec![
+                        Field::text("client_id", "Client ID", self.setup_info.client_id.clone()),
+                        Field::secret("token", "Token or redirect URL"),
+                    ],
+                )
+                .with_hint(format!(
+                    "Create an app at anilist.co/settings/developer\n\
+                     with the redirect URL {}\n\
+                     Leave the token empty to log in through the browser. Esc skips.",
+                    self.setup_info.redirect
+                ));
+                self.modal = Some(Modal::Form(Box::new(form), Purpose::LoginAniList));
+            }
+            SetupStep::Sync => {
+                let form = Form::new(
+                    "Setup 3/3: Sync",
+                    vec![Field::toggle(
+                        "auto_sync",
+                        "Update AniList automatically while watching",
+                        self.setup_info.auto_sync,
+                    )],
+                )
+                .with_hint(
+                    "When off, AniList only changes when you apply the Sync tab.\n\
+                     Enter finishes the setup.",
+                );
+                self.modal = Some(Modal::Form(Box::new(form), Purpose::SetupSync));
+            }
+        }
+    }
+
+    fn advance_setup_after_login(&mut self) {
+        match self.setup {
+            Some(SetupStep::Jellyfin) if self.auth.jellyfin_user.is_some() => {
+                self.open_setup_step(SetupStep::AniList);
+            }
+            Some(SetupStep::AniList) if self.auth.anilist_logged_in => {
+                self.open_setup_step(SetupStep::Sync);
+            }
+            _ => {}
+        }
+    }
+
+    /// Esc überspringt den aktuellen Schritt, im letzten Schritt endet die Einrichtung.
+    fn skip_setup_step(&mut self, purpose: &Purpose) -> Vec<Effect> {
+        match (self.setup, purpose) {
+            (Some(SetupStep::Jellyfin), Purpose::LoginJellyfin) => {
+                self.open_setup_step(SetupStep::AniList);
+                vec![]
+            }
+            (Some(SetupStep::AniList), Purpose::LoginAniList) => {
+                self.open_setup_step(SetupStep::Sync);
+                vec![]
+            }
+            (Some(SetupStep::Sync), Purpose::SetupSync) => {
+                self.setup = None;
+                vec![Effect::FinishSetup(None)]
+            }
+            _ => vec![],
+        }
     }
 
     fn status_field(&self, current: ListStatus, kind: MediaKind) -> Field {
@@ -1553,16 +1686,26 @@ impl App {
                 Ok((vec![effect], true))
             }
             Purpose::LoginAniList => {
+                // In der Einrichtung bleibt das Formular offen, damit Fehler dort erscheinen.
+                let keep_open = self.setup.is_some();
                 let token = form.value("token").trim().to_owned();
                 if !token.is_empty() {
-                    return Ok((vec![Effect::LoginAniListPin(token)], false));
+                    return Ok((vec![Effect::LoginAniListPin(token)], keep_open));
                 }
                 let client_id = form.value("client_id").trim().to_owned();
                 if client_id.is_empty() {
                     return Err("enter a client ID or paste a token".to_owned());
                 }
+                self.setup_info.client_id = client_id.clone();
                 self.set_notice(true, "Waiting for the browser…");
-                Ok((vec![Effect::LoginAniListBrowser(client_id)], false))
+                Ok((vec![Effect::LoginAniListBrowser(client_id)], keep_open))
+            }
+            Purpose::SetupSync => {
+                let auto_sync = form.is_on("auto_sync");
+                self.setup = None;
+                self.setup_info.auto_sync = auto_sync;
+                self.set_notice(true, "Setup complete");
+                Ok((vec![Effect::FinishSetup(Some(auto_sync))], false))
             }
             Purpose::Status(entry) => {
                 let status = Self::parse_status(form.value("status"), entry.media.kind)?;
@@ -2076,5 +2219,104 @@ mod tests {
             panic!("form expected")
         };
         assert_eq!(form.error.as_deref(), Some("nope"));
+    }
+
+    fn logged_in(jellyfin: bool, anilist: bool) -> AuthStatus {
+        AuthStatus {
+            jellyfin_user: jellyfin.then(|| "user".to_owned()),
+            jellyfin_url: jellyfin.then(|| "http://server:30013".to_owned()),
+            anilist_logged_in: anilist,
+            ..AuthStatus::default()
+        }
+    }
+
+    fn form_purpose(app: &App) -> &Purpose {
+        match &app.modal {
+            Some(Modal::Form(_, purpose)) => purpose,
+            _ => panic!("form expected"),
+        }
+    }
+
+    #[test]
+    fn setup_starts_at_the_first_missing_login() {
+        let mut app = app();
+        app.setup_info.client_id = "56388".into();
+        app.startup(&logged_in(true, false));
+        app.begin_setup();
+        assert_eq!(app.setup, Some(SetupStep::AniList));
+        let Some(Modal::Form(form, Purpose::LoginAniList)) = &app.modal else {
+            panic!("AniList form expected")
+        };
+        assert_eq!(form.value("client_id"), "56388");
+    }
+
+    #[test]
+    fn esc_walks_through_setup_and_finishes_without_changing_sync() {
+        let mut app = app();
+        app.startup(&AuthStatus::default());
+        app.begin_setup();
+        assert!(matches!(form_purpose(&app), Purpose::LoginJellyfin));
+        press_code(&mut app, KeyCode::Esc);
+        assert!(matches!(form_purpose(&app), Purpose::LoginAniList));
+        press_code(&mut app, KeyCode::Esc);
+        assert!(matches!(form_purpose(&app), Purpose::SetupSync));
+        let effects = press_code(&mut app, KeyCode::Esc);
+        assert!(matches!(effects.as_slice(), [Effect::FinishSetup(None)]));
+        assert_eq!(app.setup, None);
+        assert!(app.modal.is_none());
+    }
+
+    #[test]
+    fn successful_logins_advance_setup_and_enter_saves_auto_sync() {
+        let mut app = app();
+        app.setup_info.auto_sync = true;
+        app.startup(&AuthStatus::default());
+        app.begin_setup();
+        app.on_msg(Msg::LoggedIn("ok".into(), logged_in(true, false)));
+        assert!(matches!(form_purpose(&app), Purpose::LoginAniList));
+        app.on_msg(Msg::LoggedIn("ok".into(), logged_in(true, true)));
+        assert!(matches!(form_purpose(&app), Purpose::SetupSync));
+        press_code(&mut app, KeyCode::Char(' '));
+        let effects = press_code(&mut app, KeyCode::Enter);
+        assert!(matches!(
+            effects.as_slice(),
+            [Effect::FinishSetup(Some(false))]
+        ));
+        assert_eq!(app.setup, None);
+    }
+
+    #[test]
+    fn anilist_login_during_setup_keeps_the_form_for_errors() {
+        let mut app = app();
+        app.setup_info.client_id = "56388".into();
+        app.startup(&logged_in(true, false));
+        app.begin_setup();
+        let effects = press_code(&mut app, KeyCode::Enter);
+        assert!(matches!(
+            effects.as_slice(),
+            [Effect::LoginAniListBrowser(id)] if id == "56388"
+        ));
+        app.on_msg(Msg::Error("port in use".into()));
+        let Some(Modal::Form(form, Purpose::LoginAniList)) = &app.modal else {
+            panic!("form expected")
+        };
+        assert_eq!(form.error.as_deref(), Some("port in use"));
+    }
+
+    #[test]
+    fn anilist_login_during_setup_does_not_reopen_jellyfin() {
+        let mut app = app();
+        app.startup(&AuthStatus::default());
+        app.begin_setup();
+        press_code(&mut app, KeyCode::Esc);
+        app.on_msg(Msg::LoggedIn("ok".into(), logged_in(false, true)));
+        assert!(matches!(form_purpose(&app), Purpose::SetupSync));
+    }
+
+    #[test]
+    fn setup_command_opens_the_wizard() {
+        let mut app = app();
+        app.run_command("setup");
+        assert_eq!(app.setup, Some(SetupStep::Jellyfin));
     }
 }

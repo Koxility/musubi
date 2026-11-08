@@ -6,6 +6,7 @@ mod list;
 mod mapping;
 mod player;
 mod settings;
+mod setup;
 mod sync;
 mod util;
 

@@ -138,6 +138,8 @@ pub enum DefaultUi {
 #[serde(default)]
 pub struct UiConfig {
     pub default: DefaultUi,
+    /// Die geführte Einrichtung wurde abgeschlossen oder bewusst beendet.
+    pub setup_completed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

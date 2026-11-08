@@ -106,6 +106,14 @@ async fn perform(core: &Core, tx: &UnboundedSender<Msg>, effect: Effect) -> Resu
                 core.auth_status(),
             ));
         }
+        Effect::FinishSetup(auto_sync) => {
+            core.update_config(|c| {
+                c.ui.setup_completed = true;
+                if let Some(enabled) = auto_sync {
+                    c.sync.auto_sync = enabled;
+                }
+            })?;
+        }
         Effect::LogoutJellyfin => {
             core.logout_jellyfin().await?;
             send(Msg::LoggedIn(
