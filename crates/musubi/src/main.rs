@@ -1,12 +1,13 @@
 //! Einstiegspunkt: Kommandozeile, Logging und Start der Oberfläche.
 
 use std::io::{BufRead, Write};
+use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
 use musubi_core::domain::MediaKind;
 use musubi_core::{
-    AniListLoginFlow, Core, CoreOptions, Paths, PlayerCommand, SyncDirection, oauth,
+    AniListLoginFlow, Core, CoreOptions, Paths, PlayerBackend, PlayerCommand, SyncDirection, oauth,
 };
 use secrecy::SecretString;
 use tracing_subscriber::EnvFilter;
@@ -167,8 +168,11 @@ async fn run_sync(core: &Core, dry_run: bool) -> Result<()> {
     Ok(())
 }
 
-fn core_options() -> CoreOptions {
-    let mut options = CoreOptions::default();
+fn core_options(player: Option<Arc<dyn PlayerBackend>>) -> CoreOptions {
+    let mut options = CoreOptions {
+        player,
+        ..CoreOptions::default()
+    };
     // Nur in Debug-Builds: Release-Builds senden das Token ausschließlich an AniList.
     #[cfg(debug_assertions)]
     {
@@ -179,9 +183,13 @@ fn core_options() -> CoreOptions {
     options
 }
 
-fn run_gui(runtime: &tokio::runtime::Runtime, core: Core) -> Result<()> {
+fn run_gui(
+    runtime: &tokio::runtime::Runtime,
+    core: Core,
+    video: Option<musubi_gui::VideoLink>,
+) -> Result<()> {
     let _enter = runtime.enter();
-    musubi_gui::run(core.clone())?;
+    musubi_gui::run(core.clone(), video)?;
     runtime.block_on(async {
         let _ = core.player_command(PlayerCommand::Stop).await;
     });
@@ -194,10 +202,15 @@ fn main() -> Result<()> {
     let _log_guard = init_logging(&paths);
 
     let runtime = tokio::runtime::Runtime::new()?;
-    let core = runtime.block_on(Core::open(paths, core_options()))?;
+    let wants_gui = matches!(cli.command, None | Some(Command::Gui));
+    let (player, video) = match wants_gui.then(musubi_gui::embedded_player).flatten() {
+        Some((player, video)) => (Some(player), Some(video)),
+        None => (None, None),
+    };
+    let core = runtime.block_on(Core::open(paths, core_options(player)))?;
 
     match cli.command {
-        None | Some(Command::Gui) => run_gui(&runtime, core)?,
+        None | Some(Command::Gui) => run_gui(&runtime, core, video)?,
         Some(Command::Login {
             service,
             pin,

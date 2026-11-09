@@ -10,6 +10,8 @@ pub enum MappingSource {
     Manual,
     ProviderId,
     Title,
+    /// Bester Treffer ohne ausreichende Sicherheit. Schreibt nicht von selbst auf AniList.
+    Guess,
 }
 
 impl MappingSource {
@@ -18,6 +20,7 @@ impl MappingSource {
             Self::Manual => "manual",
             Self::ProviderId => "provider",
             Self::Title => "title",
+            Self::Guess => "guess",
         }
     }
 
@@ -25,6 +28,7 @@ impl MappingSource {
         match value {
             "provider" => Self::ProviderId,
             "title" => Self::Title,
+            "guess" => Self::Guess,
             _ => Self::Manual,
         }
     }
@@ -60,6 +64,11 @@ impl Mapping {
     }
 }
 
+/// Ob die Zuordnung eines Titels nur ein unsicherer Treffer ist.
+pub fn is_unsure(mappings: &[Mapping]) -> bool {
+    mappings.iter().any(|m| m.source == MappingSource::Guess)
+}
+
 /// Findet Werk und AniList-Episode zu einer Jellyfin-Episode.
 pub fn resolve_episode(mappings: &[Mapping], season: u32, episode: u32) -> Option<(i64, u32)> {
     mappings
@@ -84,6 +93,18 @@ mod tests {
             confidence: 1.0,
             title: String::new(),
         }
+    }
+
+    #[test]
+    fn guesses_survive_storage_and_mark_a_title_unsure() {
+        assert_eq!(
+            MappingSource::parse(MappingSource::Guess.as_str()),
+            MappingSource::Guess
+        );
+        let mut maps = [mapping(1, 1, None, 1, 0)];
+        assert!(!is_unsure(&maps));
+        maps[0].source = MappingSource::Guess;
+        assert!(is_unsure(&maps));
     }
 
     #[test]

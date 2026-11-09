@@ -67,6 +67,13 @@ pub fn badge(color: Color) -> impl Fn(&Theme) -> container::Style {
     }
 }
 
+pub fn video(_: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Color::BLACK.into()),
+        ..container::Style::default()
+    }
+}
+
 pub fn dim(_: &Theme) -> container::Style {
     container::Style {
         background: Some(Color::from_rgba8(0, 0, 0, 0.65).into()),

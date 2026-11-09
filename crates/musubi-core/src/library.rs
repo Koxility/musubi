@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use musubi_domain::{
     Episode, Library, LibraryFilters, LibraryItem, LibraryQuery, ListEntry, Mapping, Season,
-    ShelfItem, resolve_episode,
+    ShelfItem, is_unsure, resolve_episode,
 };
 
 use crate::inner::now;
@@ -28,7 +28,8 @@ pub struct LibraryRow {
     pub mappings: Vec<Mapping>,
     /// AniList-Eintrag des ersten zugeordneten Werks.
     pub entry: Option<ListEntry>,
-    pub needs_review: bool,
+    /// Die Zuordnung ist ein unsicherer Treffer.
+    pub unsure: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -89,14 +90,6 @@ impl Core {
                 .or_default()
                 .push(mapping);
         }
-        let reviews: HashSet<String> = self
-            .inner
-            .db
-            .reviews()
-            .await?
-            .into_iter()
-            .map(|r| r.jellyfin_id)
-            .collect();
         Ok(items
             .into_iter()
             .map(|item| {
@@ -104,12 +97,12 @@ impl Core {
                 let entry = mappings
                     .first()
                     .and_then(|m| self.inner.entry_for(m.media_id));
-                let needs_review = reviews.contains(&item.id);
+                let unsure = is_unsure(&mappings);
                 LibraryRow {
                     item,
                     mappings,
                     entry,
-                    needs_review,
+                    unsure,
                 }
             })
             .collect())

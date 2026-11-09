@@ -107,7 +107,7 @@ pub trait PlayerSession: Send + Sync {
 
 pub type SessionHandle = Arc<dyn PlayerSession>;
 
-/// Austauschpunkt für künftige Backends, etwa eingebettetes libmpv.
+/// Austauschpunkt für Player, derzeit mpv und der eingebettete Player der GUI.
 #[async_trait]
 pub trait PlayerBackend: Send + Sync {
     async fn open(

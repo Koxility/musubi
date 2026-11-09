@@ -20,6 +20,11 @@ secrecy.workspace = true
 chrono.workspace = true
 open.workspace = true
 iced.workspace = true
+iced_video_player.workspace = true
+gstreamer.workspace = true
+gstreamer-app.workspace = true
+musubi-player.workspace = true
+async-trait.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

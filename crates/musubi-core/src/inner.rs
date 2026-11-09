@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use musubi_domain::{ListEntry, MediaKind, Viewer};
 use musubi_player::{MpvBackend, MpvOptions, PlayerBackend, SessionHandle};
-use musubi_store::{Config, Db, Paths, SecretKey, SecretStore, open_secret_store};
+use musubi_store::{Config, Db, Paths, PlayerKind, SecretKey, SecretStore, open_secret_store};
 use tokio::sync::{Notify, broadcast};
 
 use crate::{CoreEvent, Result};
@@ -136,10 +136,12 @@ impl Inner {
     }
 
     pub fn player_backend(&self) -> Arc<dyn PlayerBackend> {
-        if let Some(player) = &self.player_override {
+        let config = self.config().player;
+        if config.backend == PlayerKind::Embedded
+            && let Some(player) = &self.player_override
+        {
             return Arc::clone(player);
         }
-        let config = self.config().player;
         Arc::new(MpvBackend::new(MpvOptions {
             binary: config.mpv_path,
             hwdec: config.hwdec,

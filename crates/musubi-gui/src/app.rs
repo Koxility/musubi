@@ -8,12 +8,14 @@ use iced::widget::image::Handle;
 use iced::widget::{button, column, container, row, stack, text};
 use iced::{Center, Element, Fill, Subscription, Task, Theme};
 use musubi_core::domain::MediaKind;
-use musubi_core::{AuthStatus, Config, Core, CoreEvent, PlaybackState, PlayerCommand, Service};
+use musubi_core::{
+    AuthStatus, Config, Core, CoreEvent, PlaybackState, PlayerCommand, PlayerKind, Service,
+};
 use tokio::sync::broadcast;
 
 use crate::images::{ImageCache, ImageKey};
 use crate::ui;
-use crate::{anilist, home, library, mapping, player, settings, setup, sync, theme};
+use crate::{anilist, home, library, mapping, player, settings, setup, sync, theme, video};
 
 const TOAST_SECONDS: u64 = 5;
 const SEEK_STEP: f64 = 10.0;
@@ -37,9 +39,13 @@ const NAVIGATION: [(Page, &str); 6] = [
     (Page::Settings, "Settings"),
 ];
 
-const SHORTCUTS: [(&str, &str); 10] = [
+const SHORTCUTS: [(&str, &str); 11] = [
     ("Ctrl+1 to 6", "Switch page"),
     ("Ctrl+R", "Refresh"),
+    (
+        "Space, Left / Right, F",
+        "In the player: pause, seek, fullscreen",
+    ),
     ("Ctrl+P", "Play or pause"),
     ("Alt+Left / Right", "Seek 10 seconds"),
     ("Ctrl+. / Ctrl+,", "Next or previous episode"),
@@ -68,6 +74,7 @@ pub enum Message {
     Sync(sync::Msg),
     Settings(settings::Msg),
     Setup(setup::Msg),
+    Video(video::Msg),
     Player(PlayerCommand),
     SeekPreview(f64),
     SeekCommit,
@@ -86,6 +93,8 @@ pub struct App {
     pub sync: sync::State,
     pub settings: settings::State,
     pub setup: Option<setup::State>,
+    pub video: video::State,
+    video_link: Option<video::VideoLink>,
     pub playback: Option<PlaybackState>,
     pub seek_preview: Option<f64>,
     pub now: i64,
@@ -126,6 +135,18 @@ fn on_key(event: keyboard::Event) -> Option<Message> {
         return None;
     };
     let player = |command| Some(Message::Player(command));
+    if modifiers.is_empty() {
+        let video_key = match key.as_ref() {
+            Key::Named(Named::Space) => Some(video::Key::Pause),
+            Key::Named(Named::ArrowLeft) => Some(video::Key::Back),
+            Key::Named(Named::ArrowRight) => Some(video::Key::Forward),
+            Key::Character("f") => Some(video::Key::Fullscreen),
+            _ => None,
+        };
+        if let Some(video_key) = video_key {
+            return Some(Message::Video(video::Msg::Key(video_key)));
+        }
+    }
     match key.as_ref() {
         Key::Named(Named::Escape) => Some(Message::Escape),
         Key::Named(Named::F1) => Some(Message::ToggleHelp),
@@ -160,7 +181,7 @@ fn unix_now() -> i64 {
 }
 
 impl App {
-    pub fn boot(core: Core) -> (Self, Task<Message>) {
+    pub fn boot(core: Core, video: Option<video::VideoLink>) -> (Self, Task<Message>) {
         let auth = core.auth_status();
         let config = core.config();
         let page = if auth.jellyfin_user.is_some() {
@@ -176,6 +197,8 @@ impl App {
         let mut app = Self {
             page,
             setup,
+            video: video::State::default(),
+            video_link: video.clone(),
             images: ImageCache::default(),
             home: home::State::default(),
             library: library::State::default(),
@@ -192,6 +215,9 @@ impl App {
             config,
             core,
         };
+        if video.is_none() && app.config.player.backend == PlayerKind::Embedded {
+            app.toast("GStreamer is not available, videos open in mpv", false);
+        }
         if let Err(error) = app.core.warn_if_expiring() {
             tracing::warn!(%error, "could not check the token expiry");
         }
@@ -208,6 +234,7 @@ impl App {
             Subscription::run_with(CoreHandle(self.core.clone()), core_events),
             keyboard::listen().filter_map(on_key),
             iced::time::every(Duration::from_secs(1)).map(|_| Message::Tick),
+            video::subscription(&self.video, self.video_link.as_ref()),
         ])
     }
 
@@ -219,6 +246,7 @@ impl App {
             anilist::load(self, MediaKind::Anime),
             mapping::load(self),
             sync::load(self),
+            mapping::auto_match(self),
         ])
     }
 
@@ -316,6 +344,9 @@ impl App {
                     self.toast = None;
                 }
             }
+            Message::Escape if self.video.is_active() => {
+                return video::update(self, video::Msg::Stop);
+            }
             Message::Escape => self.on_escape(),
             Message::ToggleHelp => self.help = !self.help,
             Message::Core(event) => return self.on_core_event(event),
@@ -328,6 +359,7 @@ impl App {
             Message::Sync(msg) => return sync::update(self, msg),
             Message::Settings(msg) => return settings::update(self, msg),
             Message::Setup(msg) => return setup::update(self, msg),
+            Message::Video(msg) => return video::update(self, msg),
             Message::Player(command) => {
                 let core = self.core.clone();
                 return ui::perform(
@@ -358,6 +390,12 @@ impl App {
             column![
                 container(text("Musubi").size(22).color(theme::ACCENT)).padding([8, 14]),
                 column(items).spacing(4),
+                match self.mapping.progress() {
+                    Some((done, total)) => {
+                        container(ui::muted(format!("Matching {done} / {total}"))).padding([0, 14])
+                    }
+                    None => container(iced::widget::Space::new()),
+                },
             ]
             .spacing(18),
         )
@@ -410,6 +448,13 @@ impl App {
     }
 
     pub fn view(&self) -> Element<'_, Message> {
+        if self.video.is_active() {
+            let player = video::view(self);
+            return match self.toast_view() {
+                Some(toast) => stack![player, toast].into(),
+                None => player,
+            };
+        }
         let content = column![self.page_view(), player::view(self)];
         let shell: Element<'_, Message> = row![
             self.navigation(),

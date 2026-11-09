@@ -9,7 +9,8 @@ pub const AUTO_ACCEPT: f64 = 0.92;
 pub const AUTO_MARGIN: f64 = 0.05;
 /// Abzug für Fortsetzungen, wenn die Suche nicht nach einer Fortsetzung fragt.
 const SEQUEL_PENALTY: f64 = 0.06;
-
+/// Darunter ist ein Kandidat zu schlecht, um ihn überhaupt zuzuordnen.
+pub const MIN_GUESS: f64 = 0.6;
 /// Vereinheitlicht Titel: Kleinschreibung, keine Satzzeichen, keine Staffel-Angaben.
 pub fn normalize_title(title: &str) -> String {
     let cleaned: String = title
@@ -76,6 +77,49 @@ fn is_ordinal(word: &str) -> bool {
         .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
 }
 
+/// Suchbegriffe für AniList, der genaueste zuerst. `normalize_title` taugt nur zum Vergleichen:
+/// Aus „JoJo's“ würde „jojo s“, und dafür findet AniList nichts.
+pub fn search_terms(title: &str) -> Vec<String> {
+    let trimmed = title.trim();
+    let without_year = trimmed
+        .rsplit_once('(')
+        .filter(|(_, rest)| {
+            rest.trim_end_matches(')')
+                .parse::<i32>()
+                .is_ok_and(|y| (1950..=2100).contains(&y))
+        })
+        .map_or(trimmed, |(head, _)| head.trim());
+    let without_subtitle = [": ", " - "]
+        .iter()
+        .filter_map(|separator| without_year.split_once(separator))
+        .map(|(head, _)| head.trim())
+        .min_by_key(|head| head.len())
+        .unwrap_or(without_year);
+    let without_umlauts: String = without_year
+        .chars()
+        .flat_map(|c| match c {
+            'ä' | 'Ä' => vec!['a'],
+            'ö' | 'Ö' => vec!['o'],
+            'ü' | 'Ü' => vec!['u'],
+            'ß' => vec!['s', 's'],
+            other => vec![other],
+        })
+        .collect();
+    let mut terms: Vec<String> = Vec::new();
+    for term in [
+        without_year.to_owned(),
+        without_umlauts,
+        without_year.replace('\'', ""),
+        without_subtitle.to_owned(),
+        normalize_title(title),
+    ] {
+        if !term.is_empty() && !terms.contains(&term) {
+            terms.push(term);
+        }
+    }
+    terms
+}
+
 #[derive(Debug, Clone)]
 pub struct MatchQuery<'a> {
     pub title: &'a str,
@@ -138,6 +182,24 @@ pub fn rank<'m>(query: &MatchQuery<'_>, candidates: &'m [Media]) -> Vec<(&'m Med
 }
 
 /// `true`, wenn der beste Kandidat sicher genug für eine automatische Übernahme ist.
+/// Wie sicher der beste Kandidat einer Suche ist.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Verdict {
+    Sure,
+    Unsure,
+    NoMatch,
+}
+
+pub fn verdict(ranked: &[(&Media, f64)]) -> Verdict {
+    if should_auto_accept(ranked) {
+        Verdict::Sure
+    } else if ranked.first().is_some_and(|(_, best)| *best >= MIN_GUESS) {
+        Verdict::Unsure
+    } else {
+        Verdict::NoMatch
+    }
+}
+
 pub fn should_auto_accept(ranked: &[(&Media, f64)]) -> bool {
     match ranked {
         [] => false,
@@ -211,6 +273,31 @@ pub fn plan_chain(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn search_keeps_punctuation_and_falls_back_to_simpler_forms() {
+        let jojo = search_terms("JoJo's Bizarre Adventure");
+        assert_eq!(jojo[0], "JoJo's Bizarre Adventure");
+        assert!(jojo.contains(&"JoJos Bizarre Adventure".to_owned()));
+
+        let arifureta = search_terms("Arifureta: From Commonplace to World's Strongest");
+        assert!(arifureta.contains(&"Arifureta".to_owned()));
+
+        assert_eq!(search_terms("Berserk (2016)")[0], "Berserk");
+        assert_eq!(search_terms("Kämpfer")[1], "Kampfer");
+        assert_eq!(search_terms("K-ON!")[0], "K-ON!");
+    }
+
+    #[test]
+    fn verdict_separates_sure_unsure_and_no_match() {
+        let media = Media::default();
+        assert_eq!(verdict(&[(&media, 0.95)]), Verdict::Sure);
+        // Knapp hinter dem Zweiten ist trotz hohem Wert nicht sicher.
+        assert_eq!(verdict(&[(&media, 0.95), (&media, 0.94)]), Verdict::Unsure);
+        assert_eq!(verdict(&[(&media, MIN_GUESS)]), Verdict::Unsure);
+        assert_eq!(verdict(&[(&media, MIN_GUESS - 0.01)]), Verdict::NoMatch);
+        assert_eq!(verdict(&[]), Verdict::NoMatch);
+    }
     use musubi_domain::{MediaTitle, resolve_episode};
 
     fn media(id: i64, title: &str, year: i32, format: &str, episodes: u32) -> Media {

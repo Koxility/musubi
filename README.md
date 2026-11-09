@@ -7,8 +7,8 @@
 - **Jellyfin:** Login per Passwort oder API-Key, Bibliothek durchsuchen und filtern (Genre, Status, Jahr, Typ), Episoden mit Metadaten, Direct Stream mit Transcoding-Fallback, Fortschritt wird zurückgemeldet.
 - **AniList:** Einträge anlegen, bearbeiten und löschen, Status, Fortschritt (Episoden, Kapitel, Bände), Score in deinem Format, Advanced Scoring, Notizen, Custom Lists, Start- und Enddatum, Private und Sichtbarkeit. Funktioniert auch ganz ohne Jellyfin.
 - **Sync:** automatisch beim Schauen oder manuell mit Vorschau. Schreibzugriffe landen in einer Warteschlange und gehen offline nicht verloren.
-- **Matching:** Provider-IDs, Titelvergleich, Fortsetzungen und Cours, Prüfliste für unklare Fälle, exakte manuelle Zuordnung.
-- **Player:** mpv mit Hardware-Decoding, Untertiteln und deiner eigenen `mpv.conf`.
+- **Matching:** läuft automatisch über Provider-IDs, Titelvergleich, Fortsetzungen und Cours. Jede Zuordnung lässt sich nachträglich ändern. Unsichere Treffer tragen ein `?` und schreiben erst nach einer Bestätigung auf AniList.
+- **Player:** Video läuft im App-Fenster über GStreamer mit Hardware-Decoding und ASS-Untertiteln. Optional geht es weiter über mpv im eigenen Fenster.
 
 ## Voraussetzungen
 
@@ -17,13 +17,14 @@ Linux mit Wayland oder X11 und:
 | Paket | Zweck |
 |---|---|
 | Rust ab 1.95 | Build |
-| `mpv` | Wiedergabe (zur Laufzeit) |
+| `gstreamer` samt `gst-plugins-base`, `-good`, `-bad`, `gst-libav` | Wiedergabe im Fenster (zur Laufzeit) |
+| `mpv` | optionale Wiedergabe im eigenen Fenster |
 | C-Compiler, `pkgconf` | Build (SQLite wird mitgebaut) |
 
 Auf Arch, CachyOS und Verwandten:
 
 ```bash
-sudo pacman -S --needed base-devel mpv
+sudo pacman -S --needed base-devel gst-plugins-base gst-plugins-good gst-plugins-bad gst-libav mpv
 ```
 
 Rust installierst du über [rustup](https://rustup.rs). Liegt es wie hier unter `~/.cargo/bin` und du nutzt fish:
@@ -106,6 +107,7 @@ auto_sync = true
 watched_threshold = 0.85    # ab 85 % gilt eine Episode als gesehen
 
 [player]
+backend = "embedded"        # oder "mpv" für das eigene Fenster
 mpv_path = "mpv"
 hwdec = "auto-safe"         # leer = Einstellung aus deiner mpv.conf
 extra_args = []
@@ -139,7 +141,7 @@ musubi sync --dry-run
 musubi sync
 ```
 
-`F1` zeigt alle Kürzel. Die wichtigsten sind `Ctrl+1` bis `Ctrl+6` für die Seiten, `Ctrl+R` zum Aktualisieren, `Ctrl+P` für Pause und `Alt+←/→` zum Spulen. `Esc` schließt Dialoge und Detailseiten. Im mpv-Fenster gelten die üblichen mpv-Tasten.
+`F1` zeigt alle Kürzel. Die wichtigsten sind `Ctrl+1` bis `Ctrl+6` für die Seiten, `Ctrl+R` zum Aktualisieren, `Ctrl+P` für Pause und `Alt+←/→` zum Spulen. Im Player gelten `Leertaste`, `←/→` und `F` für Vollbild, `Esc` führt zurück. `Esc` schließt Dialoge und Detailseiten. Im mpv-Fenster gelten die üblichen mpv-Tasten.
 
 ## Entwicklung
 

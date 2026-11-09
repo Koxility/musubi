@@ -8,7 +8,8 @@ use musubi_core::domain::{
     EntryPatch, ItemKind, LibraryItem, ListStatus, Mapping, MappingSource, MediaKind,
 };
 use musubi_core::{
-    Config, Core, CoreEvent, CoreOptions, Paths, PlayerCommand, Service, SyncDirection,
+    Config, Core, CoreEvent, CoreOptions, MatchOutcome, Paths, PlayerCommand, Service,
+    SyncDirection,
 };
 use secrecy::SecretString;
 use serde_json::{Value, json};
@@ -574,4 +575,91 @@ async fn manual_sync_pushes_and_pulls() {
         (saved[0]["mediaId"].as_i64(), saved[0]["progress"].as_u64()),
         (Some(501), Some(2))
     );
+}
+
+async fn mock_search(candidate_title: &'static str) -> MockServer {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(move |request: &Request| {
+            let body: Value = serde_json::from_slice(&request.body).unwrap();
+            let query = body["query"].as_str().unwrap();
+            let candidate = json!({
+                "id": 500, "type": "ANIME", "format": "MOVIE", "episodes": 1,
+                "title": {"romaji": candidate_title}, "seasonYear": 2020, "genres": []
+            });
+            let data = if query.contains("Viewer") {
+                json!({"Viewer": {"id": 7, "name": "eden",
+                    "mediaListOptions": {"scoreFormat": "POINT_100"}}})
+            } else if query.contains("Page") {
+                json!({"Page": {"media": [candidate]}})
+            } else {
+                json!({"Media": candidate})
+            };
+            ResponseTemplate::new(200)
+                .insert_header("X-RateLimit-Limit", "90")
+                .set_body_json(json!({"data": data}))
+        })
+        .mount(&server)
+        .await;
+    server
+}
+
+fn movie() -> LibraryItem {
+    LibraryItem {
+        id: "m1".into(),
+        kind: ItemKind::Movie,
+        name: "Garden of Words".into(),
+        ..series()
+    }
+}
+
+#[tokio::test]
+async fn weak_matches_are_guessed_kept_changeable_and_confirmable() {
+    let dir = tempfile::tempdir().unwrap();
+    let anilist = mock_search("The Gardens of Wonder").await;
+    let core = core(dir.path(), &anilist).await;
+    core.login_anilist_pin("token").await.unwrap();
+
+    let outcome = core.auto_match(&movie()).await.unwrap();
+
+    assert_eq!(outcome, MatchOutcome::Unsure);
+    let guessed = core.mappings_for("m1").await.unwrap();
+    assert_eq!(guessed[0].source, MappingSource::Guess);
+    assert_eq!(guessed[0].media_id, 500);
+    let reviews = core.reviews().await.unwrap();
+    assert_eq!(reviews[0].candidates[0].media_id, 500);
+
+    core.confirm_mapping("m1").await.unwrap();
+
+    let confirmed = core.mappings_for("m1").await.unwrap();
+    assert_eq!(confirmed[0].source, MappingSource::Manual);
+    assert_eq!(confirmed[0].confidence, 1.0);
+}
+
+#[tokio::test]
+async fn hopeless_candidates_stay_unmapped_but_count_as_tried() {
+    let dir = tempfile::tempdir().unwrap();
+    let anilist = mock_search("Zzyzx").await;
+    let core = core(dir.path(), &anilist).await;
+    core.login_anilist_pin("token").await.unwrap();
+
+    let outcome = core.auto_match(&movie()).await.unwrap();
+
+    assert_eq!(outcome, MatchOutcome::NoMatch);
+    assert!(core.mappings_for("m1").await.unwrap().is_empty());
+    assert_eq!(core.reviews().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn removing_a_mapping_keeps_the_title_from_being_matched_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let anilist = mock_search("Garden of Words").await;
+    let core = core(dir.path(), &anilist).await;
+    core.login_anilist_pin("token").await.unwrap();
+    core.auto_match(&movie()).await.unwrap();
+
+    core.unmap("m1").await.unwrap();
+
+    assert!(core.mappings_for("m1").await.unwrap().is_empty());
+    assert_eq!(core.reviews().await.unwrap()[0].jellyfin_id, "m1");
 }

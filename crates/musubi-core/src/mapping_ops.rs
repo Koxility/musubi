@@ -1,5 +1,6 @@
-//! Zuordnung von Jellyfin-Titeln zu AniList: automatisch, zur Prüfung und von Hand.
+//! Zuordnung von Jellyfin-Titeln zu AniList: automatisch und nachträglich von Hand.
 
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use musubi_anilist::Error as AniListError;
@@ -9,8 +10,9 @@ use musubi_domain::{
 use musubi_store::{ReviewCandidate, ReviewItem};
 
 use crate::inner::now;
+use crate::library::LibraryRow;
 use crate::matching::{
-    ChainLink, MatchQuery, SeasonSpan, normalize_title, plan_chain, rank, should_auto_accept,
+    ChainLink, MIN_GUESS, MatchQuery, SeasonSpan, Verdict, plan_chain, rank, search_terms, verdict,
 };
 use crate::{Core, CoreEvent, Result};
 
@@ -33,7 +35,8 @@ impl Drop for MatchRunGuard {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MatchOutcome {
     Mapped,
-    NeedsReview,
+    Unsure,
+    NoMatch,
 }
 
 impl Core {
@@ -128,7 +131,8 @@ impl Core {
         Ok(None)
     }
 
-    /// Ordnet einen Titel zu oder legt ihn mit Kandidaten auf die Prüfliste.
+    /// Ordnet einen Titel seinem besten Treffer zu. Die Kandidaten bleiben für spätere Änderungen
+    /// gespeichert und merken zugleich, dass der Titel schon versucht wurde.
     pub async fn auto_match(&self, item: &LibraryItem) -> Result<MatchOutcome> {
         let session = self.require_anilist()?;
         if let Some(media) = self.media_from_provider_ids(item).await? {
@@ -142,11 +146,16 @@ impl Core {
         } else {
             &SERIES_FORMATS
         };
-        let search = normalize_title(&item.name);
-        let candidates = session
-            .client
-            .search(&search, MediaKind::Anime, Some(formats), 15)
-            .await?;
+        let mut candidates = Vec::new();
+        for term in search_terms(&item.name) {
+            candidates = session
+                .client
+                .search(&term, MediaKind::Anime, Some(formats), 15)
+                .await?;
+            if !candidates.is_empty() {
+                break;
+            }
+        }
         let episodes = match item.kind {
             ItemKind::Movie => None,
             ItemKind::Series => self.seasons_of(item).await?.first().map(|s| s.count),
@@ -159,13 +168,18 @@ impl Core {
         };
         let ranked = rank(&query, &candidates);
 
-        if should_auto_accept(&ranked) {
+        let result = verdict(&ranked);
+        let accepted = match result {
+            Verdict::Sure => Some(MappingSource::Title),
+            Verdict::Unsure => Some(MappingSource::Guess),
+            Verdict::NoMatch => None,
+        };
+        if let Some(source) = accepted {
             let (media, score) = ranked[0];
-            self.apply_mapping(item, media, MappingSource::Title, score)
+            self.apply_mapping(item, media, source, score.min(1.0))
                 .await?;
-            return Ok(MatchOutcome::Mapped);
         }
-
+        // Erst nach `apply_mapping`, das gespeicherte Kandidaten entfernt.
         let review = ReviewItem {
             jellyfin_id: item.id.clone(),
             title: item.name.clone(),
@@ -177,29 +191,92 @@ impl Core {
         };
         self.inner.db.set_review(review, now()).await?;
         self.inner.emit(CoreEvent::MappingsChanged);
-        Ok(MatchOutcome::NeedsReview)
+        Ok(match result {
+            Verdict::Sure => MatchOutcome::Mapped,
+            Verdict::Unsure => MatchOutcome::Unsure,
+            Verdict::NoMatch => MatchOutcome::NoMatch,
+        })
+    }
+
+    /// Übernimmt Titel, die in früheren Versionen auf der Prüfliste gelandet sind.
+    async fn adopt_open_reviews(&self, rows: &[LibraryRow]) -> Result<HashSet<String>> {
+        let session = self.require_anilist()?;
+        let mut adopted = HashSet::new();
+        for review in self.inner.db.reviews().await? {
+            let Some(row) = rows
+                .iter()
+                .find(|r| r.item.id == review.jellyfin_id && r.mappings.is_empty())
+            else {
+                continue;
+            };
+            let Some((media_id, score)) = review
+                .candidates
+                .first()
+                .map(|c| (c.media_id, c.score))
+                .filter(|(_, score)| *score >= MIN_GUESS)
+            else {
+                continue;
+            };
+            let applied = async {
+                let media = session.client.media(media_id).await?;
+                self.apply_mapping(&row.item, &media, MappingSource::Guess, score)
+                    .await
+            };
+            match applied.await {
+                Ok(()) => {
+                    adopted.insert(row.item.id.clone());
+                    self.inner.db.set_review(review, now()).await?;
+                }
+                Err(error) => tracing::warn!(item = %row.item.name, %error, "matching failed"),
+            }
+        }
+        Ok(adopted)
     }
 
     /// Ordnet alle noch offenen Titel zu. Läuft pro Prozess nur einmal gleichzeitig.
-    pub async fn match_all(&self) -> Result<()> {
+    ///
+    /// Titel ohne Treffer werden nur mit `retry_unmatched` erneut gesucht. Ohne Änderung bleibt
+    /// `LibraryChanged` aus, denn die Oberfläche startet diesen Lauf selbst.
+    pub async fn match_all(&self, retry_unmatched: bool) -> Result<()> {
         if MATCH_RUNNING.swap(true, Ordering::SeqCst) {
             return Ok(());
         }
         let _guard = MatchRunGuard;
         let rows = self.library(&LibraryQuery::default()).await?;
+        let adopted = self.adopt_open_reviews(&rows).await?;
+        let tried: HashSet<String> = if retry_unmatched {
+            HashSet::new()
+        } else {
+            self.inner
+                .db
+                .reviews()
+                .await?
+                .into_iter()
+                .map(|r| r.jellyfin_id)
+                .collect()
+        };
         let pending: Vec<LibraryItem> = rows
             .into_iter()
-            .filter(|r| r.mappings.is_empty() && !r.needs_review)
+            .filter(|r| {
+                r.mappings.is_empty()
+                    && !adopted.contains(&r.item.id)
+                    && !tried.contains(&r.item.id)
+            })
             .map(|r| r.item)
             .collect();
+        if pending.is_empty() && adopted.is_empty() {
+            return Ok(());
+        }
         let total = pending.len();
         self.inner.emit(CoreEvent::MatchProgress { done: 0, total });
         let mut mapped = 0;
-        let mut review = 0;
+        let mut unsure = adopted.len();
+        let mut unmatched = 0;
         for (index, item) in pending.iter().enumerate() {
             match self.auto_match(item).await {
                 Ok(MatchOutcome::Mapped) => mapped += 1,
-                Ok(MatchOutcome::NeedsReview) => review += 1,
+                Ok(MatchOutcome::Unsure) => unsure += 1,
+                Ok(MatchOutcome::NoMatch) => unmatched += 1,
                 Err(error) => tracing::warn!(item = %item.name, %error, "matching failed"),
             }
             self.inner.emit(CoreEvent::MatchProgress {
@@ -207,10 +284,14 @@ impl Core {
                 total,
             });
         }
-        self.inner.emit(CoreEvent::LibraryChanged);
+        if mapped + unsure > 0 {
+            self.inner.emit(CoreEvent::LibraryChanged);
+        }
         self.inner.emit(CoreEvent::Notice {
             ok: true,
-            message: format!("Matching finished: {mapped} mapped, {review} need review"),
+            message: format!(
+                "Matching finished: {mapped} matched, {unsure} unsure, {unmatched} without a match"
+            ),
         });
         Ok(())
     }
@@ -263,8 +344,39 @@ impl Core {
         Ok(())
     }
 
+    /// Macht aus einem unsicheren Treffer eine feste Zuordnung.
+    pub async fn confirm_mapping(&self, jellyfin_id: &str) -> Result<()> {
+        let mut mappings = self.inner.db.mappings_for(jellyfin_id).await?;
+        for mapping in &mut mappings {
+            mapping.source = MappingSource::Manual;
+            mapping.confidence = 1.0;
+        }
+        self.set_mappings(jellyfin_id, mappings).await
+    }
+
+    /// Entfernt die Zuordnung. Der Titel gilt als versucht, damit der nächste automatische Lauf
+    /// die Entscheidung nicht rückgängig macht.
     pub async fn unmap(&self, jellyfin_id: &str) -> Result<()> {
-        self.set_mappings(jellyfin_id, Vec::new()).await
+        let title = self
+            .inner
+            .db
+            .mappings_for(jellyfin_id)
+            .await?
+            .first()
+            .map(|m| m.title.clone())
+            .unwrap_or_default();
+        self.inner
+            .db
+            .replace_mappings(jellyfin_id, Vec::new())
+            .await?;
+        let tried = ReviewItem {
+            jellyfin_id: jellyfin_id.to_owned(),
+            title,
+            candidates: Vec::new(),
+        };
+        self.inner.db.set_review(tried, now()).await?;
+        self.inner.emit(CoreEvent::MappingsChanged);
+        Ok(())
     }
 }
 

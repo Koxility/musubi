@@ -6,7 +6,7 @@ use iced::widget::{
 };
 use iced::{Bottom, Center, Element, Fill, Length, Task};
 use musubi_core::domain::{
-    ItemKind, Library, LibraryFilters, LibraryItem, LibraryQuery, LibrarySort,
+    ItemKind, Library, LibraryFilters, LibraryItem, LibraryQuery, LibrarySort, is_unsure,
 };
 use musubi_core::{EpisodeRow, LibraryRow};
 
@@ -99,6 +99,7 @@ pub enum Msg {
     SetPlayed(String, bool),
     EditEntry(LibraryItem),
     Map(LibraryItem),
+    ConfirmMapping(String),
 }
 
 impl State {
@@ -263,9 +264,28 @@ pub fn update(app: &mut App, msg: Msg) -> Task<Message> {
             );
         }
         Msg::EditEntry(item) => anilist::open_editor_for(app, &item),
-        Msg::Map(item) => mapping::open_map_dialog(app, item),
+        Msg::Map(item) => mapping::open_change_dialog(app, item),
+        Msg::ConfirmMapping(id) => return mapping::confirm(app, id),
     }
     Task::none()
+}
+
+/// Überträgt geänderte Zuordnungen auf die geladenen Zeilen, ohne die Bibliothek neu zu laden.
+pub fn sync_mappings(app: &mut App) {
+    let core = &app.core;
+    let mappings = &app.mapping.mappings;
+    for row in &mut app.library.rows {
+        row.mappings = mappings
+            .iter()
+            .filter(|m| m.jellyfin_id == row.item.id)
+            .cloned()
+            .collect();
+        row.unsure = is_unsure(&row.mappings);
+        row.entry = row
+            .mappings
+            .first()
+            .and_then(|m| core.entry_for(m.media_id));
+    }
 }
 
 /// Staffel der ersten ungesehenen Episode, sonst die erste vorhandene.
@@ -345,8 +365,8 @@ fn poster_card<'a>(app: &'a App, row_data: &'a LibraryRow) -> Element<'a, Msg> {
     if item.played {
         badges = badges.push(ui::badge_row("✓".to_owned(), theme::GREEN));
     }
-    if row_data.needs_review {
-        badges = badges.push(ui::badge_row("Review".to_owned(), theme::ORANGE));
+    if row_data.unsure {
+        badges = badges.push(ui::badge_row("?".to_owned(), theme::ORANGE));
     }
     let subtitle = match (&row_data.entry, item.year) {
         (Some(entry), _) => format!(
@@ -529,13 +549,12 @@ fn season_tabs(detail: &Detail) -> Element<'_, Msg> {
 
 fn anilist_summary<'a>(app: &'a App, item: &'a LibraryItem) -> Element<'a, Msg> {
     let row_data = app.library.rows.iter().find(|r| r.item.id == item.id);
-    let mapped = row_data.is_some_and(|r| !r.mappings.is_empty());
-    let entry = row_data
-        .and_then(|r| r.mappings.first())
-        .and_then(|m| app.core.entry_for(m.media_id));
-    let summary = match (&entry, mapped) {
-        (Some(entry), _) => format!(
-            "AniList: {} · {}/{}",
+    let mapping = row_data.and_then(|r| r.mappings.first());
+    let entry = mapping.and_then(|m| app.core.entry_for(m.media_id));
+    let summary = match (mapping, &entry) {
+        (Some(mapping), Some(entry)) => format!(
+            "AniList: {} · {} {}/{}",
+            ui::ellipsize(&mapping.title, 44),
             entry.status.label(entry.media.kind),
             entry.progress,
             entry
@@ -543,15 +562,26 @@ fn anilist_summary<'a>(app: &'a App, item: &'a LibraryItem) -> Element<'a, Msg> 
                 .total_units()
                 .map_or("?".to_owned(), |t| t.to_string())
         ),
-        (None, true) => "AniList: mapped, not on your list".to_owned(),
-        (None, false) => "AniList: not mapped".to_owned(),
+        (Some(mapping), None) => format!(
+            "AniList: {} · not on your list",
+            ui::ellipsize(&mapping.title, 44)
+        ),
+        (None, _) => "AniList: no match".to_owned(),
     };
     let mut actions = row![ui::muted(summary)].spacing(10).align_y(Center);
+    if row_data.is_some_and(|r| r.unsure) {
+        actions = actions
+            .push(ui::badge_row(
+                "? unsure, not synced".to_owned(),
+                theme::ORANGE,
+            ))
+            .push(ui::primary("Confirm", Msg::ConfirmMapping(item.id.clone())));
+    }
     if entry.is_some() {
         actions = actions.push(ui::secondary("Edit entry", Msg::EditEntry(item.clone())));
     }
     actions
-        .push(ui::secondary("Map…", Msg::Map(item.clone())))
+        .push(ui::secondary("Change…", Msg::Map(item.clone())))
         .into()
 }
 

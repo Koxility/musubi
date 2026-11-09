@@ -31,7 +31,11 @@ Die Abhängigkeiten zeigen nur nach unten, und der Compiler erzwingt das über d
 
 Die GUI ist reiner Rust-Code ohne Systembibliotheken wie GTK und sieht auf jedem Desktop gleich aus. Jede Seite bringt Zustand, Nachrichten und Ansicht mit, `app.rs` verbindet sie mit dem Kern. Poster werden erst geladen, wenn sie sichtbar werden. Die Cache-Dateien heißen `*.img`, deshalb liest die GUI sie als Bytes: Bei Pfaden wählt Iced den Decoder nach der Dateiendung. Der Preis: Iced hat keine virtualisierten Raster, die Bibliothek baut also für jeden Titel Widgets.
 
-### Player: mpv als Prozess über JSON-IPC
+### Player: GStreamer im Fenster, mpv als Alternative
+
+Standard ist `iced_video_player` mit GStreamer: Das Bild läuft nativ in der Iced-Oberfläche, die Steuerung kann darüber liegen, und das Projekt bleibt ohne eigenen `unsafe`-Code. Untertitel rendert `assrender` ins Bild. `EmbeddedPlayer` erfüllt dasselbe `PlayerBackend` wie mpv, Fortschritt und Sync im Kern merken keinen Unterschied. Der Stream öffnet abseits des UI-Threads, GStreamer-Objekte leben danach auf dem UI-Thread. Fehlen Plugins, fällt die App auf mpv zurück.
+
+mpv läuft als eigener Prozess über JSON-IPC:
 
 Hardware-Decoding, ASS-Untertitel und Wayland/X11 kommen fertig von mpv, und deine `mpv.conf` gilt weiter. Ein Absturz des Players reißt die App nicht mit, es gibt kein FFI und GUI und TUI funktionieren gleich. Der Preis ist das eigene Fenster. Der Trait `PlayerBackend` ist der Austauschpunkt für eine spätere Einbettung.
 
@@ -57,7 +61,8 @@ Rund ein Dutzend Operationen rechtfertigen keinen Codegen-Schritt samt eingechec
 1. Eine manuelle Zuordnung gewinnt immer.
 2. `ProviderIds`: AniList direkt, MyAnimeList über `Media(idMal:)`.
 3. Titelsuche mit Normalisierung und Jaro-Winkler über alle Titel und Synonyme, dazu Bonus oder Abzug für Jahr, Format und Episodenzahl. Automatisch übernommen wird ab 0.92 und mit mindestens 0.05 Abstand zum Zweitplatzierten.
-4. Alles andere landet mit Kandidaten auf der Prüfliste.
+4. Alles andere bekommt ab einem Mindestwert den besten Kandidaten als unsicheren Treffer (`Guess`). Solche Titel schreiben nicht von selbst auf AniList und werden im Sync mit `Skip` vorgeschlagen, bis sie bestätigt oder geändert sind.
+5. Das Matching läuft beim Start, nach dem Login und bei *Refresh* für alle noch nie versuchten Titel. Manuelle Zuordnungen werden nie überschrieben.
 
 AniList zählt pro Werk, oft pro Cour, Jellyfin pro Staffel. `plan_chain` folgt daher den `SEQUEL`-Relationen und verteilt Staffeln auf Werke. Das deckt eine Staffel über mehrere Cours ebenso ab wie ein Werk über mehrere Staffeln und absolute Nummerierung. Jede Zuordnung gilt für einen Episodenbereich und trägt einen Offset.
 
@@ -92,7 +97,8 @@ Der Rate-Limiter startet mit dem gemessenen Limit von 30 Anfragen pro Minute, ü
 
 ## Bekannte Limitationen
 
-- mpv läuft in einem eigenen Fenster, in der GUI ist das Video nicht eingebettet.
+- Im eingebetteten Player gilt `mpv.conf` nicht. Von mehreren externen Untertiteldateien wird nur die erste geladen, eingebettete Spuren sind davon nicht betroffen.
+- Ein Untertitel, der exakt bei Sekunde 0 beginnt, kann beim Start fehlen.
 - Ob transkodiert wird, entscheidet der Server. Eigene Profile gibt es nicht, nur `max_bitrate`.
 - Es gibt keinen Offline-Download, ohne Server läuft nur die AniList-Verwaltung über den Cache.
 - Kein automatischer Sync von AniList nach Jellyfin, nur manuell.
@@ -105,7 +111,6 @@ Der Rate-Limiter startet mit dem gemessenen Limit von 30 Anfragen pro Minute, ü
 
 ## Mögliche Erweiterungen
 
-- Eingebettetes Video über libmpv und `GtkGLArea` als weiteres `PlayerBackend`.
 - Quick Connect als dritte Jellyfin-Anmeldung.
 - Offline-Modus mit Downloads.
 - Weitere Tracker wie MyAnimeList oder Kitsu über einen `Tracker`-Trait.

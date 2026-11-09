@@ -1,12 +1,14 @@
-//! Zuordnungen prüfen und bearbeiten.
+//! Automatische Zuordnungen ansehen und nachträglich ändern.
 
-use iced::widget::{Column, button, column, progress_bar, row, scrollable, text, toggler};
+use iced::widget::{
+    Column, column, container, progress_bar, row, scrollable, text, text_input, toggler,
+};
 use iced::{Center, Element, Fill, Length, Task};
-use musubi_core::ReviewItem;
-use musubi_core::domain::{LibraryItem, Mapping, MappingSource};
+use musubi_core::domain::{LibraryItem, Mapping, MappingSource, Media, MediaKind};
+use musubi_core::{ReviewCandidate, ReviewItem};
 
 use crate::app::{App, Message};
-use crate::{theme, ui};
+use crate::{library, theme, ui};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct MappingForm {
@@ -66,8 +68,11 @@ impl MappingForm {
 }
 
 pub enum Modal {
-    Map {
+    Change {
         item: Box<LibraryItem>,
+        query: String,
+        results: Vec<Media>,
+        searching: bool,
         id: String,
         follow: bool,
         error: Option<String>,
@@ -82,9 +87,8 @@ pub enum Modal {
 #[derive(Default)]
 pub struct State {
     reviews: Vec<ReviewItem>,
-    mappings: Vec<Mapping>,
+    pub mappings: Vec<Mapping>,
     progress: Option<(usize, usize)>,
-    expanded: Option<String>,
     modal: Option<Modal>,
 }
 
@@ -95,6 +99,10 @@ impl State {
 
     pub fn set_progress(&mut self, done: usize, total: usize) {
         self.progress = (done < total).then_some((done, total));
+    }
+
+    pub fn progress(&self) -> Option<(usize, usize)> {
+        self.progress
     }
 }
 
@@ -110,13 +118,16 @@ pub enum FormEdit {
 #[derive(Debug, Clone)]
 pub enum Msg {
     Loaded(Result<(Vec<ReviewItem>, Vec<Mapping>), String>),
-    MatchAll,
-    Expand(String),
-    MapTo(Box<LibraryItem>, i64, bool),
-    OpenMap(Box<LibraryItem>),
+    MatchAgain,
+    OpenChange(Box<LibraryItem>),
+    Query(String),
+    Search,
+    Results(Result<Vec<Media>, String>),
     MapId(String),
     MapFollow(bool),
-    SubmitMap,
+    UseMedia(i64),
+    SubmitId,
+    Confirm(String),
     OpenEdit(Box<Mapping>),
     Edit(FormEdit),
     SubmitEdit,
@@ -132,13 +143,34 @@ pub fn load(app: &App) -> Task<Message> {
     )
 }
 
-pub fn open_map_dialog(app: &mut App, item: LibraryItem) {
-    app.mapping.modal = Some(Modal::Map {
+/// Ordnet neue Titel im Hintergrund zu, sobald beide Dienste angemeldet sind.
+pub fn auto_match(app: &App) -> Task<Message> {
+    if app.auth.jellyfin_user.is_none() || !app.auth.anilist_logged_in {
+        return Task::none();
+    }
+    let core = app.core.clone();
+    ui::perform(async move { core.match_all(false).await }, Message::Notify)
+}
+
+pub fn open_change_dialog(app: &mut App, item: LibraryItem) {
+    app.mapping.modal = Some(Modal::Change {
+        query: item.name.clone(),
         item: Box::new(item),
+        results: vec![],
+        searching: false,
         id: String::new(),
         follow: true,
         error: None,
     });
+}
+
+/// Macht aus einem unsicheren Treffer eine feste Zuordnung.
+pub fn confirm(app: &App, id: String) -> Task<Message> {
+    let core = app.core.clone();
+    ui::perform(
+        async move { core.confirm_mapping(&id).await },
+        Message::Notify,
+    )
 }
 
 fn map_to(app: &App, item: LibraryItem, media: i64, follow: bool) -> Task<Message> {
@@ -149,50 +181,80 @@ fn map_to(app: &App, item: LibraryItem, media: i64, follow: bool) -> Task<Messag
     )
 }
 
+/// Schließt den Ändern-Dialog und ordnet das gewählte Werk zu.
+fn use_media(app: &mut App, media: i64) -> Task<Message> {
+    let Some(Modal::Change { item, follow, .. }) = app.mapping.modal.take() else {
+        return Task::none();
+    };
+    map_to(app, *item, media, follow)
+}
+
 pub fn update(app: &mut App, msg: Msg) -> Task<Message> {
     let core = app.core.clone();
     match msg {
         Msg::Loaded(Ok((reviews, mappings))) => {
             app.mapping.reviews = reviews;
             app.mapping.mappings = mappings;
+            library::sync_mappings(app);
         }
         Msg::Loaded(Err(error)) => app.toast(error, false),
-        Msg::MatchAll => {
-            return ui::perform(async move { core.match_all().await }, Message::Notify);
+        Msg::MatchAgain => {
+            return ui::perform(async move { core.match_all(true).await }, Message::Notify);
         }
-        Msg::Expand(id) => {
-            app.mapping.expanded = (app.mapping.expanded.as_ref() != Some(&id)).then_some(id);
+        Msg::OpenChange(item) => open_change_dialog(app, *item),
+        Msg::Query(value) => {
+            if let Some(Modal::Change { query, .. }) = &mut app.mapping.modal {
+                *query = value;
+            }
         }
-        Msg::MapTo(item, media, follow) => return map_to(app, *item, media, follow),
-        Msg::OpenMap(item) => open_map_dialog(app, *item),
+        Msg::Search => {
+            if let Some(Modal::Change {
+                query, searching, ..
+            }) = &mut app.mapping.modal
+            {
+                *searching = true;
+                let text = query.clone();
+                return ui::perform(
+                    async move { core.search_anilist(&text, MediaKind::Anime).await },
+                    |r| Message::Mapping(Msg::Results(r)),
+                );
+            }
+        }
+        Msg::Results(result) => {
+            if let Some(Modal::Change {
+                results,
+                searching,
+                error,
+                ..
+            }) = &mut app.mapping.modal
+            {
+                *searching = false;
+                match result {
+                    Ok(found) => *results = found,
+                    Err(message) => *error = Some(message),
+                }
+            }
+        }
         Msg::MapId(value) => {
-            if let Some(Modal::Map { id, .. }) = &mut app.mapping.modal {
+            if let Some(Modal::Change { id, .. }) = &mut app.mapping.modal {
                 *id = value;
             }
         }
         Msg::MapFollow(value) => {
-            if let Some(Modal::Map { follow, .. }) = &mut app.mapping.modal {
+            if let Some(Modal::Change { follow, .. }) = &mut app.mapping.modal {
                 *follow = value;
             }
         }
-        Msg::SubmitMap => {
-            if let Some(Modal::Map {
-                item,
-                id,
-                follow,
-                error,
-            }) = &mut app.mapping.modal
-            {
+        Msg::UseMedia(media) => return use_media(app, media),
+        Msg::SubmitId => {
+            if let Some(Modal::Change { id, error, .. }) = &mut app.mapping.modal {
                 match id.trim().parse::<i64>() {
-                    Ok(media) => {
-                        let (item, follow) = ((**item).clone(), *follow);
-                        app.mapping.modal = None;
-                        return map_to(app, item, media, follow);
-                    }
+                    Ok(media) => return use_media(app, media),
                     Err(_) => *error = Some("The ID must be a number.".to_owned()),
                 }
             }
         }
+        Msg::Confirm(id) => return confirm(app, id),
         Msg::OpenEdit(mapping) => {
             app.mapping.modal = Some(Modal::Edit {
                 form: MappingForm::new(&mapping),
@@ -243,6 +305,7 @@ pub fn update(app: &mut App, msg: Msg) -> Task<Message> {
             }
         }
         Msg::Unmap(id) => {
+            app.mapping.modal = None;
             return ui::perform(async move { core.unmap(&id).await }, Message::Notify);
         }
         Msg::Close => app.mapping.modal = None,
@@ -258,78 +321,44 @@ fn item_for<'a>(app: &'a App, id: &str) -> Option<&'a LibraryItem> {
         .map(|r| &r.item)
 }
 
-fn review_row<'a>(app: &'a App, review: &'a ReviewItem) -> Element<'a, Msg> {
-    let open = app.mapping.expanded.as_deref() == Some(review.jellyfin_id.as_str());
-    let header = button(
-        row![
-            text(ui::ellipsize(&review.title, 80)).size(15).width(Fill),
-            ui::muted(format!("{} candidates", review.candidates.len())),
-        ]
-        .align_y(Center),
-    )
-    .width(Fill)
-    .padding(8)
-    .style(theme::card_button)
-    .on_press(Msg::Expand(review.jellyfin_id.clone()));
-    let mut body = column![header].spacing(4);
-    if open {
-        let item = item_for(app, &review.jellyfin_id);
-        for candidate in &review.candidates {
-            let details = format!(
-                "{} · {} · {} eps · match {:.0}%",
-                candidate.format.as_deref().unwrap_or("?"),
-                candidate.year.map_or("?".to_owned(), |y| y.to_string()),
-                candidate.episodes.map_or("?".to_owned(), |e| e.to_string()),
-                candidate.score * 100.0
-            );
-            let mut line = row![
-                column![
-                    text(ui::ellipsize(&candidate.title, 70)).size(14),
-                    ui::muted(details),
-                ]
-                .width(Fill)
-            ]
-            .align_y(Center);
-            if let Some(item) = item {
-                line = line.push(ui::primary(
-                    "Map",
-                    Msg::MapTo(Box::new(item.clone()), candidate.media_id, true),
-                ));
-            }
-            body = body.push(iced::widget::container(line).padding([4, 12]));
-        }
-        if let Some(item) = item {
-            body = body.push(
-                iced::widget::container(ui::secondary(
-                    "Enter an AniList ID…",
-                    Msg::OpenMap(Box::new(item.clone())),
-                ))
-                .padding([4, 12]),
-            );
-        }
-    }
-    body.into()
-}
-
 fn mapped_row<'a>(app: &'a App, mapping: &'a Mapping) -> Element<'a, Msg> {
-    let name = item_for(app, &mapping.jellyfin_id)
-        .map_or(mapping.jellyfin_id.as_str(), |i| i.name.as_str());
+    let item = item_for(app, &mapping.jellyfin_id);
+    let name = item.map_or(mapping.jellyfin_id.as_str(), |i| i.name.as_str());
     let details = format!(
-        "S{} E{}-{} ({:+}) → {} [{}]",
+        "S{} E{}-{} ({:+}) → {}",
         mapping.season,
         mapping.ep_start,
         mapping.ep_end.map_or("…".to_owned(), |e| e.to_string()),
         mapping.offset,
-        ui::ellipsize(&mapping.title, 50),
-        mapping.source.as_str()
+        ui::ellipsize(&mapping.title, 60),
     );
+    let unsure = mapping.source == MappingSource::Guess;
+    let mut heading = row![text(ui::ellipsize(name, 64)).size(15)]
+        .spacing(8)
+        .align_y(Center);
+    if unsure {
+        heading = heading.push(ui::badge_row("? unsure".to_owned(), theme::ORANGE));
+    }
+    let mut line = row![column![heading, ui::muted(details)].spacing(2).width(Fill)]
+        .spacing(8)
+        .align_y(Center);
+    if unsure {
+        line = line.push(ui::primary(
+            "Confirm",
+            Msg::Confirm(mapping.jellyfin_id.clone()),
+        ));
+    }
+    line = line.push(match item {
+        Some(item) => ui::secondary("Change…", Msg::OpenChange(Box::new(item.clone()))),
+        None => ui::secondary("Edit…", Msg::OpenEdit(Box::new(mapping.clone()))),
+    });
+    container(line).padding(6).into()
+}
+
+fn unmatched_row(item: &LibraryItem) -> Element<'_, Msg> {
     row![
-        button(column![text(ui::ellipsize(name, 70)).size(15), ui::muted(details)].spacing(2))
-            .width(Fill)
-            .padding(6)
-            .style(theme::card_button)
-            .on_press(Msg::OpenEdit(Box::new(mapping.clone()))),
-        ui::secondary("Remove", Msg::Unmap(mapping.jellyfin_id.clone())),
+        text(ui::ellipsize(&item.name, 80)).size(15).width(Fill),
+        ui::secondary("Choose…", Msg::OpenChange(Box::new(item.clone()))),
     ]
     .spacing(8)
     .align_y(Center)
@@ -342,9 +371,10 @@ pub fn view(app: &App) -> Element<'_, Message> {
         row![
             ui::heading("Mapping"),
             ui::spacer(),
-            ui::primary("Match all", Msg::MatchAll),
+            ui::secondary("Match again", Msg::MatchAgain),
         ]
-        .align_y(Center)
+        .align_y(Center),
+        ui::muted("Titles are matched automatically. Change anything here or on a title's page."),
     ]
     .spacing(18)
     .padding(iced::padding::right(14));
@@ -360,38 +390,145 @@ pub fn view(app: &App) -> Element<'_, Message> {
             .align_y(Center),
         );
     }
-    let reviews: Vec<Element<'_, Msg>> = state.reviews.iter().map(|r| review_row(app, r)).collect();
-    let mapped: Vec<Element<'_, Msg>> = state.mappings.iter().map(|m| mapped_row(app, m)).collect();
+    let unmatched: Vec<Element<'_, Msg>> = app
+        .library
+        .rows
+        .iter()
+        .filter(|r| r.mappings.is_empty())
+        .map(|r| unmatched_row(&r.item))
+        .collect();
+    if !unmatched.is_empty() {
+        body = body
+            .push(text(format!("Without a match ({})", unmatched.len())).size(16))
+            .push(ui::card(column(unmatched).spacing(8)));
+    }
+    let mut ordered: Vec<&Mapping> = state.mappings.iter().collect();
+    ordered.sort_by_key(|m| m.source != MappingSource::Guess);
+    let mapped: Vec<Element<'_, Msg>> = ordered.into_iter().map(|m| mapped_row(app, m)).collect();
     body = body
-        .push(text(format!("Needs review ({})", reviews.len())).size(16))
-        .push(ui::card(column(reviews).spacing(4)))
-        .push(text(format!("Mapped titles ({})", mapped.len())).size(16))
+        .push(text(format!("Matched titles ({})", mapped.len())).size(16))
         .push(ui::card(column(mapped).spacing(4)));
     let page: Element<'_, Msg> = scrollable(body).width(Fill).height(Fill).into();
-    let page = iced::widget::container(page).padding(24);
+    let page = container(page).padding(24);
     Element::from(page).map(Message::Mapping)
 }
 
-fn map_body<'a>(id: &'a str, follow: bool, error: Option<&'a str>) -> Column<'a, Msg> {
-    let mut body = column![
-        ui::muted("The ID is the number in the anilist.co URL."),
-        ui::field("AniList ID", id, Msg::MapId),
-        toggler(follow)
-            .label("Assign sequels to later seasons")
-            .text_size(14)
-            .on_toggle(Msg::MapFollow),
+fn choice_line<'a>(title: &str, details: String, media: i64) -> Element<'a, Msg> {
+    row![
+        column![text(ui::ellipsize(title, 56)).size(14), ui::muted(details),].width(Fill),
+        ui::primary("Use", Msg::UseMedia(media)),
     ]
-    .spacing(12);
-    if let Some(error) = error {
-        body = body.push(ui::error_line(error));
+    .spacing(8)
+    .align_y(Center)
+    .into()
+}
+
+fn candidate_line<'a>(candidate: &ReviewCandidate) -> Element<'a, Msg> {
+    let details = format!(
+        "{} · {} · {} eps · match {:.0}%",
+        candidate.format.as_deref().unwrap_or("?"),
+        candidate.year.map_or("?".to_owned(), |y| y.to_string()),
+        candidate.episodes.map_or("?".to_owned(), |e| e.to_string()),
+        candidate.score * 100.0
+    );
+    choice_line(&candidate.title, details, candidate.media_id)
+}
+
+fn result_line<'a>(media: &Media) -> Element<'a, Msg> {
+    let details = format!(
+        "{} · {} · {} eps",
+        media.format.as_deref().unwrap_or("?"),
+        media.season_year.map_or("?".to_owned(), |y| y.to_string()),
+        media.episodes.map_or("?".to_owned(), |e| e.to_string()),
+    );
+    choice_line(media.title.preferred(), details, media.id)
+}
+
+struct ChangeView<'a> {
+    item: &'a LibraryItem,
+    query: &'a str,
+    results: &'a [Media],
+    searching: bool,
+    id: &'a str,
+    follow: bool,
+    error: Option<&'a str>,
+}
+
+fn change_body<'a>(app: &'a App, view: ChangeView<'a>) -> Column<'a, Msg> {
+    let state = &app.mapping;
+    let current: Vec<&Mapping> = state
+        .mappings
+        .iter()
+        .filter(|m| m.jellyfin_id == view.item.id)
+        .collect();
+    let summary = current.first().map_or_else(
+        || "Not matched yet.".to_owned(),
+        |m| format!("Currently: {}", ui::ellipsize(&m.title, 60)),
+    );
+    let mut body = column![ui::muted(summary)].spacing(12);
+    let suggestions: Vec<Element<'a, Msg>> = state
+        .reviews
+        .iter()
+        .find(|r| r.jellyfin_id == view.item.id)
+        .map(|r| r.candidates.iter().map(candidate_line).collect())
+        .unwrap_or_default();
+    if !suggestions.is_empty() {
+        body = body
+            .push(text("Suggestions").size(16))
+            .push(column(suggestions).spacing(8));
     }
-    body.push(
+    body = body.push(text("Search AniList").size(16)).push(
         row![
-            ui::spacer(),
-            ui::secondary("Cancel", Msg::Close),
-            ui::primary("Map", Msg::SubmitMap),
+            text_input("Title", view.query)
+                .on_input(Msg::Query)
+                .on_submit(Msg::Search)
+                .padding(8)
+                .style(theme::input),
+            ui::secondary("Search", Msg::Search),
         ]
         .spacing(8),
+    );
+    if view.searching {
+        body = body.push(ui::muted("Searching…"));
+    } else if !view.results.is_empty() {
+        body = body.push(column(view.results.iter().map(result_line)).spacing(8));
+    }
+    body = body
+        .push(
+            row![
+                container(ui::field(
+                    "or AniList ID (the number in the URL)",
+                    view.id,
+                    Msg::MapId
+                ))
+                .width(Fill),
+                ui::secondary("Use ID", Msg::SubmitId),
+            ]
+            .spacing(8)
+            .align_y(iced::Bottom),
+        )
+        .push(
+            toggler(view.follow)
+                .label("Assign sequels to later seasons")
+                .text_size(14)
+                .on_toggle(Msg::MapFollow),
+        );
+    if let Some(error) = view.error {
+        body = body.push(ui::error_line(error));
+    }
+    let mut actions = row![].spacing(8);
+    if let Some(first) = current.first() {
+        actions = actions
+            .push(ui::danger("Remove match", Msg::Unmap(view.item.id.clone())))
+            .push(ui::secondary(
+                "Exact editor…",
+                Msg::OpenEdit(Box::new((*first).clone())),
+            ));
+    }
+    body.push(
+        actions
+            .push(ui::spacer())
+            .push(ui::secondary("Close", Msg::Close)),
     )
 }
 
@@ -428,16 +565,31 @@ pub fn with_modal<'a>(app: &'a App, base: Element<'a, Message>) -> Element<'a, M
         return base;
     };
     match modal {
-        Modal::Map {
+        Modal::Change {
             item,
+            query,
+            results,
+            searching,
             id,
             follow,
             error,
         } => ui::modal(
             base,
             &item.name,
-            460.0,
-            Element::from(map_body(id, *follow, error.as_deref())).map(Message::Mapping),
+            560.0,
+            Element::from(change_body(
+                app,
+                ChangeView {
+                    item,
+                    query,
+                    results,
+                    searching: *searching,
+                    id,
+                    follow: *follow,
+                    error: error.as_deref(),
+                },
+            ))
+            .map(Message::Mapping),
         ),
         Modal::Edit {
             original,

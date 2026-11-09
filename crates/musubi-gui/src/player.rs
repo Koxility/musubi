@@ -1,4 +1,4 @@
-//! Leiste für die laufende Wiedergabe in mpv.
+//! Leiste für die Wiedergabe im externen mpv-Fenster.
 
 use iced::widget::{Space, button, column, container, row, slider, text};
 use iced::{Center, Element, Fill};
@@ -16,7 +16,8 @@ fn control<'a>(label: &'a str, command: PlayerCommand) -> Element<'a, Message> {
 }
 
 pub fn view(app: &App) -> Element<'_, Message> {
-    let Some(state) = &app.playback else {
+    // Der eingebettete Player bringt seine eigene Steuerung mit.
+    let Some(state) = app.playback.as_ref().filter(|_| !app.video.is_active()) else {
         return Space::new().height(0).into();
     };
     let duration = state.duration.unwrap_or(0.0).max(1.0);

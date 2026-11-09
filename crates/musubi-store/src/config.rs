@@ -93,6 +93,18 @@ pub struct PlayerConfig {
     pub extra_args: Vec<String>,
     /// Folgeepisoden automatisch einreihen.
     pub autoplay_next: bool,
+    pub backend: PlayerKind,
+}
+
+/// Wo Videos laufen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PlayerKind {
+    /// Im Fenster der App.
+    #[default]
+    Embedded,
+    /// Im eigenen Fenster von mpv.
+    Mpv,
 }
 
 impl Default for PlayerConfig {
@@ -102,6 +114,7 @@ impl Default for PlayerConfig {
             hwdec: "auto-safe".to_owned(),
             extra_args: Vec::new(),
             autoplay_next: true,
+            backend: PlayerKind::default(),
         }
     }
 }

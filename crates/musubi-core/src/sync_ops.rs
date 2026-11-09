@@ -4,7 +4,8 @@ use std::collections::{BTreeMap, HashMap};
 
 use chrono::Local;
 use musubi_domain::{
-    FuzzyDate, ItemKind, LibraryItem, LibraryQuery, ListEntry, Mapping, Media, resolve_episode,
+    FuzzyDate, ItemKind, LibraryItem, LibraryQuery, ListEntry, Mapping, Media, is_unsure,
+    resolve_episode,
 };
 
 use crate::anilist_ops::placeholder_entry;
@@ -78,6 +79,14 @@ impl Core {
             self.auto_match(item).await?;
             mappings = self.inner.db.mappings_for(&item.id).await?;
         }
+        if is_unsure(&mappings) {
+            self.notice(
+                false,
+                format!("{}: AniList match is unsure, confirm it to sync", item.name),
+            )
+            .await?;
+            return Ok(());
+        }
         match resolve_episode(&mappings, season, episode) {
             Some((media_id, anilist_episode)) => {
                 self.apply_watched(media_id, anilist_episode).await?;
@@ -141,6 +150,11 @@ impl Core {
                 let anilist = entry.as_ref().map_or(0, |e| e.progress);
                 let Some(direction) = suggest_direction(jellyfin, anilist) else {
                     continue;
+                };
+                let direction = if row.unsure {
+                    SyncDirection::Skip
+                } else {
+                    direction
                 };
                 let title = row
                     .mappings
