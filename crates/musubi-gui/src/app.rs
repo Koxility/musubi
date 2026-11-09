@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use iced::keyboard::{self, Key, key::Named};
 use iced::widget::image::Handle;
 use iced::widget::{button, column, container, row, stack, text};
-use iced::{Center, Element, Fill, Subscription, Task, Theme};
+use iced::{Center, Color, Element, Fill, Subscription, Task, Theme};
 use musubi_core::domain::MediaKind;
 use musubi_core::{
     AuthStatus, Config, Core, CoreEvent, PlaybackState, PlayerCommand, PlayerKind, Service,
@@ -18,6 +18,8 @@ use crate::ui;
 use crate::{anilist, home, library, mapping, player, settings, setup, sync, theme, video};
 
 const TOAST_SECONDS: u64 = 5;
+/// Version und Git-Stand dieses Builds, gesetzt von `build.rs`.
+const BUILD: &str = concat!("v", env!("CARGO_PKG_VERSION"), " · ", env!("MUSUBI_COMMIT"));
 const SEEK_STEP: f64 = 10.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -435,6 +437,13 @@ impl App {
                     }
                     None => container(iced::widget::Space::new()),
                 },
+                iced::widget::Space::new().height(Fill),
+                // Zeigt, welcher Build läuft, z. B. ob der Starter noch eine alte Binary öffnet.
+                container(text(BUILD).size(11).color(Color {
+                    a: 0.6,
+                    ..theme::MUTED
+                }))
+                .padding([0, 14]),
             ]
             .spacing(18),
         )
@@ -450,7 +459,7 @@ impl App {
         self.library
             .detail
             .as_ref()
-            .is_some_and(|d| d.origin == self.page)
+            .is_some_and(|d| d.origin == self.page && d.opened_at == self.nav_generation)
     }
 
     /// Die aktuelle Seite. Iced übernimmt Widget-Zustand wie die Scroll-Position, solange an
@@ -653,6 +662,25 @@ mod tests {
         // Ein Pfad, der die Seite ohne Reset wechselt, darf keine fremde Detailseite zeigen.
         app.page = Page::Library;
         assert!(!app.shows_detail());
+    }
+
+    #[tokio::test]
+    async fn a_detail_from_before_the_last_click_never_shows_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = app(dir.path()).await;
+        app.page = Page::Home;
+        let _ = library::open_detail(&mut app, show());
+        let stale = app.library.detail.take();
+
+        let _ = app.update(Message::Navigate(Page::Home));
+        // Selbst wenn ein Pfad den alten Zustand nach dem Klick zurückschreibt, bleibt die
+        // Startseite sichtbar.
+        app.library.detail = stale;
+
+        assert_eq!(app.page, Page::Home);
+        assert!(!app.shows_detail());
+        let _ = library::open_detail(&mut app, show());
+        assert!(app.shows_detail(), "opening it again after the click works");
     }
 
     #[tokio::test]

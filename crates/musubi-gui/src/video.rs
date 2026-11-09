@@ -804,14 +804,15 @@ fn bottom_bar<'a>(state: &'a State, session: &'a Session, video: &'a Video) -> E
     ]
     .spacing(14)
     .align_y(Center);
+    // Wiedergabe zwischen den Episoden-Sprüngen, wie bei Streaming-Diensten.
     let left = row![
+        control(Icon::SkipPrevious, 22.0, previous, "Previous episode"),
         control(
             play.0,
             26.0,
             Some(command(PlayerCommand::TogglePause)),
             play.1
         ),
-        control(Icon::SkipPrevious, 22.0, previous, "Previous episode"),
         control(Icon::SkipNext, 22.0, next, "Next episode"),
         row![
             control(
