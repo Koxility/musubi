@@ -1,49 +1,37 @@
 # Musubi
 
-**Musubi** (結び, „Verbindung, Knoten“) streamt Anime von deinem Jellyfin-Server und verwaltet deine AniList vollständig. Die Oberfläche ist eine GUI mit Iced.
+**Musubi** (結び, "knot, connection") streams anime from your Jellyfin server and keeps your AniList in sync. It is a native Linux desktop app written in Rust.
 
-- **Startseite:** großes Titelbild und Regale für Weiterschauen, Nächste Episoden und Zuletzt hinzugefügt, wie in einem Mediacenter.
-- **AniList-Übersicht:** Airing mit Countdown und Rückstand, Anime und Manga in Progress, `+` für die nächste Episode.
-- **Jellyfin:** Login per Passwort oder API-Key, Bibliothek durchsuchen und filtern (Genre, Status, Jahr, Typ), Episoden mit Metadaten, Direct Stream mit Transcoding-Fallback, Fortschritt wird zurückgemeldet.
-- **AniList:** Einträge anlegen, bearbeiten und löschen, Status, Fortschritt (Episoden, Kapitel, Bände), Score in deinem Format, Advanced Scoring, Notizen, Custom Lists, Start- und Enddatum, Private und Sichtbarkeit. Funktioniert auch ganz ohne Jellyfin.
-- **Sync:** automatisch beim Schauen oder manuell mit Vorschau. Schreibzugriffe landen in einer Warteschlange und gehen offline nicht verloren.
-- **Matching:** läuft automatisch über Provider-IDs, Titelvergleich, Fortsetzungen und Cours. Jede Zuordnung lässt sich nachträglich ändern. Unsichere Treffer tragen ein `?` und schreiben erst nach einer Bestätigung auf AniList.
-- **Player:** Video läuft im App-Fenster über GStreamer mit Hardware-Decoding und ASS-Untertiteln. Optional geht es weiter über mpv im eigenen Fenster.
+- **Home** – a hero banner plus shelves for *Continue Watching*, *Next Up* and *Recently Added*, like a media center.
+- **Built-in player** – plays inside the app window via GStreamer, with hardware decoding and ASS subtitles. mpv in its own window is available as an alternative.
+- **Automatic matching** – every Jellyfin season is matched to its own AniList entry. Matching uses provider IDs, sequels (even across movies and OVAs), and title search. You can change, confirm or remove any match per season.
+- **Sync** – progress goes to AniList automatically as you watch, or manually with a preview. Writes are queued and survive being offline.
+- **AniList management** – add, edit and delete entries for anime and manga: status, progress, score in your format, advanced scoring, notes, custom lists, dates, privacy. Works without Jellyfin too.
+- **Jellyfin library** – browse and filter by genre, status, year and type. Uses direct streaming with transcoding as a fallback and reports playback progress back to the server.
 
-## Voraussetzungen
+## Install
 
-Linux mit Wayland oder X11 und:
+### Release binary
 
-| Paket | Zweck |
-|---|---|
-| Rust ab 1.95 | Build |
-| `gstreamer` samt `gst-plugins-base`, `-good`, `-bad`, `gst-libav` | Wiedergabe im Fenster (zur Laufzeit) |
-| `mpv` | optionale Wiedergabe im eigenen Fenster |
-| C-Compiler, `pkgconf` | Build (SQLite wird mitgebaut) |
-
-Auf Arch, CachyOS und Verwandten:
+Download `musubi-<version>-x86_64-linux.tar.gz` from the [releases page](https://github.com/Koxility/musubi/releases) and unpack it:
 
 ```bash
-sudo pacman -S --needed base-devel gst-plugins-base gst-plugins-good gst-plugins-bad gst-libav mpv
-```
-
-Rust installierst du über [rustup](https://rustup.rs). Liegt es wie hier unter `~/.cargo/bin` und du nutzt fish:
-
-```bash
-fish_add_path ~/.cargo/bin
-```
-
-## Build und Installation
-
-```bash
-cargo build --release
+tar xzf musubi-*-x86_64-linux.tar.gz
 ```
 
 ```bash
-cargo install --path crates/musubi
+cd musubi-*-x86_64-linux && ./install.sh
 ```
 
-Optional für den Anwendungsstarter:
+`install.sh` copies the binary to `~/.local/bin` and the launcher and icon to `~/.local/share`. Make sure `~/.local/bin` is on your `PATH`.
+
+The binary needs GStreamer at runtime. See [Requirements](#requirements).
+
+### From source
+
+```bash
+cargo install --locked --path crates/musubi
+```
 
 ```bash
 install -Dm644 packaging/musubi.desktop ~/.local/share/applications/musubi.desktop
@@ -53,85 +41,77 @@ install -Dm644 packaging/musubi.desktop ~/.local/share/applications/musubi.deskt
 install -Dm644 packaging/musubi.svg ~/.local/share/icons/hicolor/scalable/apps/musubi.svg
 ```
 
-## Einrichtung
+The two `install` lines are optional; they add Musubi to your application launcher.
 
-Beim ersten Start führt dich Musubi Schritt für Schritt durch Jellyfin, AniList und die Sync-Einstellung. Jeder Schritt lässt sich überspringen. Solange die Einrichtung nicht abgeschlossen ist und ein Login fehlt, erscheint sie beim nächsten Start wieder. Später startest du sie unter *Settings* mit *Run setup* erneut.
+The bottom of the sidebar shows the version and commit you are running, e.g. `v0.1.0 · 218b921`.
+
+## Requirements
+
+Linux with Wayland or X11, plus:
+
+| Package | Needed for |
+|---|---|
+| GStreamer with `gst-plugins-base`, `-good`, `-bad` and `gst-libav` | the built-in player |
+| `mpv` | optional, playback in a separate window |
+| Rust 1.95 or newer, a C compiler, `pkgconf`, GStreamer development files | building from source only |
+
+Arch, CachyOS and derivatives:
+
+```bash
+sudo pacman -S --needed base-devel gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-libav mpv
+```
+
+Debian and Ubuntu:
+
+```bash
+sudo apt install gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav mpv
+```
+
+Building on Debian or Ubuntu also needs `build-essential pkg-config libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev`. Install Rust with [rustup](https://rustup.rs).
+
+## Setup
+
+On first launch, a short wizard walks you through Jellyfin, AniList and sync. You can skip any step and rerun the wizard later from *Settings → Run setup*.
 
 ### Jellyfin
 
-Im Setup, unter *Settings* oder per Kommandozeile:
+Log in from the wizard, from *Settings*, or from the command line:
 
 ```bash
 musubi login jellyfin
 ```
 
-Mit `--api-key` meldest du dich per API-Key an. Das Passwort wird nur für die Anmeldung benutzt und nie gespeichert.
+Add `--api-key` to log in with an API key instead. Your password is only used to log in and is never stored.
 
 ### AniList
 
-Musubi enthält bewusst keine fest eingebaute App-Kennung.
+Musubi does not ship a built-in AniList client ID, so you create your own once:
 
-1. Lege unter <https://anilist.co/settings/developer> eine Anwendung an.
-2. Trage als Redirect-URL `http://127.0.0.1:47823/callback` ein.
-3. Gib die Client-ID im Setup ein oder melde dich per Kommandozeile an. Das Client-Secret braucht Musubi nicht:
+1. Create an app at <https://anilist.co/settings/developer>.
+2. Set the redirect URL to `http://127.0.0.1:47823/callback`.
+3. Enter the client ID in the wizard or log in from the command line. The client secret is not needed.
 
 ```bash
 musubi login anilist
 ```
 
-Auf einem Rechner ohne Browser, etwa per SSH, nutzt du als Redirect-URL `https://anilist.co/api/v2/oauth/pin` und meldest dich so an:
+On a machine without a browser, e.g. over SSH, use `https://anilist.co/api/v2/oauth/pin` as the redirect URL and log in with:
 
 ```bash
 musubi login anilist --pin
 ```
 
-AniList-Tokens gelten ein Jahr und lassen sich nicht verlängern. Musubi warnt 14 Tage vor dem Ablauf.
+AniList tokens are valid for one year and cannot be refreshed. Musubi warns you 14 days before yours expires.
 
-### Konfiguration
+## Usage
 
-Alles ist optional. Die Datei `~/.config/musubi/config.toml` entsteht beim ersten Speichern:
-
-```toml
-[jellyfin]
-url = "https://jellyfin.example.org"
-library_ids = []            # leer = alle Bibliotheken
-# max_bitrate = 8000000     # ohne Wert entscheidet der Server
-
-[anilist]
-client_id = "12345"
-login_flow = "loopback"     # oder "pin"
-loopback_port = 47823
-
-[sync]
-auto_sync = true
-watched_threshold = 0.85    # ab 85 % gilt eine Episode als gesehen
-
-[player]
-backend = "embedded"        # oder "mpv" für das eigene Fenster
-mpv_path = "mpv"
-hwdec = "auto-safe"         # leer = Einstellung aus deiner mpv.conf
-extra_args = []
-autoplay_next = true
-
-[secrets]
-backend = "file"            # oder "secret-service" für KWallet/GNOME Keyring
-```
-
-| Pfad | Inhalt |
-|---|---|
-| `~/.config/musubi/config.toml` | Einstellungen |
-| `~/.config/musubi/credentials.toml` | Tokens, Rechte 0600, wird bei offeneren Rechten abgelehnt |
-| `~/.local/share/musubi/musubi.db` | Zuordnungen, Warteschlange, Cache |
-| `~/.cache/musubi/images/` | Poster |
-| `~/.local/state/musubi/` | Logs, Detailgrad über `MUSUBI_LOG=debug` |
-
-## Benutzung
+Start the app with:
 
 ```bash
 musubi
 ```
 
-startet die GUI. Ohne Oberfläche abgleichen:
+Sync without opening the window, first as a preview:
 
 ```bash
 musubi sync --dry-run
@@ -141,9 +121,62 @@ musubi sync --dry-run
 musubi sync
 ```
 
-`F1` zeigt alle Kürzel. Die wichtigsten sind `Ctrl+1` bis `Ctrl+6` für die Seiten, `Ctrl+R` zum Aktualisieren, `Ctrl+P` für Pause und `Alt+←/→` zum Spulen. Im Player gelten `Leertaste`, `←/→` und `F` für Vollbild, `Esc` führt zurück. `Esc` schließt Dialoge und Detailseiten. Im mpv-Fenster gelten die üblichen mpv-Tasten.
+### Keyboard shortcuts
 
-## Entwicklung
+| Keys | Action |
+|---|---|
+| `Ctrl+1` … `Ctrl+6` | Switch page |
+| `Ctrl+R` | Refresh |
+| `Space`, `←` / `→`, `F`, `M` | Player: pause, seek 10 s, fullscreen, mute |
+| `Ctrl+P` | Play or pause |
+| `Alt+←` / `Alt+→` | Seek 10 s |
+| `Ctrl+.` / `Ctrl+,` | Next or previous episode |
+| `Ctrl+J` / `Ctrl+K` | Cycle subtitles / audio track |
+| `Ctrl+Shift+S` | Stop playback |
+| `Esc` | Close a dialog, the detail page or the player |
+| `F1` | Show all shortcuts |
+
+In the mpv window, the usual mpv keys apply.
+
+## Configuration
+
+Everything is optional and can be changed in *Settings*. The file `~/.config/musubi/config.toml` is created the first time you save:
+
+```toml
+[jellyfin]
+url = "https://jellyfin.example.org"
+library_ids = []            # empty = all libraries
+# max_bitrate = 8000000     # unset = the server decides
+
+[anilist]
+client_id = "12345"
+login_flow = "loopback"     # or "pin"
+loopback_port = 47823
+
+[sync]
+auto_sync = true
+watched_threshold = 0.85    # an episode counts as watched at 85 %
+
+[player]
+backend = "embedded"        # or "mpv" for a separate window
+mpv_path = "mpv"
+hwdec = "auto-safe"         # empty = use your mpv.conf
+extra_args = []
+autoplay_next = true
+
+[secrets]
+backend = "file"            # or "secret-service" for KWallet / GNOME Keyring
+```
+
+| Path | Contents |
+|---|---|
+| `~/.config/musubi/config.toml` | settings |
+| `~/.config/musubi/credentials.toml` | tokens, mode 0600 (refused if more permissive) |
+| `~/.local/share/musubi/musubi.db` | matches, write queue, cache |
+| `~/.cache/musubi/images/` | posters and backdrops |
+| `~/.local/state/musubi/` | logs; set `MUSUBI_LOG=debug` for more detail |
+
+## Development
 
 ```bash
 cargo test --workspace
@@ -153,14 +186,20 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-Die End-to-End-Tests nutzen Mock-Server und, falls installiert, echtes `mpv` und `ffmpeg`.
+The end-to-end tests run against mock servers and use real `mpv` and `ffmpeg` when installed.
 
-Ohne echte Server kannst du mit dem Demo-Backend starten. Es gibt zwei URLs aus und akzeptiert jedes Passwort:
+To try the app without real servers, start the demo backend. It prints two URLs and accepts any password:
 
 ```bash
 cargo run -p musubi-core --example demo_backend
 ```
 
-Debug-Builds schicken AniList-Anfragen an die Adresse aus `MUSUBI_DEV_ANILIST_ENDPOINT`. Release-Builds ignorieren diese Variable.
+Debug builds send AniList requests to `MUSUBI_DEV_ANILIST_ENDPOINT` if set; release builds ignore it.
 
-Architektur, Entscheidungen und Grenzen stehen in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Pushing a tag like `v0.1.0` builds the release archive and publishes it, using the matching section of [CHANGELOG.md](CHANGELOG.md) as release notes.
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design, decisions and known limitations.
+
+## License
+
+[GPL-3.0-or-later](LICENSE)

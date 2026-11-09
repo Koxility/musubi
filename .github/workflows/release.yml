@@ -1,0 +1,55 @@
+# Builds the Linux archive and publishes a GitHub release when a version tag is pushed.
+#
+#   git tag -a v0.1.0 -m "Musubi 0.1.0" && git push origin v0.1.0
+#
+# The release notes come from the matching section of CHANGELOG.md.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            libxkbcommon-dev libwayland-dev
+
+      # Pinned so that lints added in newer Rust versions cannot break a release.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.97.0
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Lint
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace --locked
+
+      - name: Build
+        run: cargo build --release --locked -p musubi
+
+      - name: Package
+        run: packaging/package.sh "${GITHUB_REF_NAME#v}"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Musubi ${{ github.ref_name }}
+          body_path: dist/notes.md
+          files: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
