@@ -1,18 +1,20 @@
 //! Zuordnung von Jellyfin-Titeln zu AniList: automatisch und nachträglich von Hand.
 
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use musubi_anilist::Error as AniListError;
 use musubi_domain::{
-    ItemKind, LibraryItem, LibraryQuery, Mapping, MappingSource, Media, MediaKind,
+    ItemKind, LibraryItem, LibraryQuery, Mapping, MappingSource, Media, MediaKind, Season,
+    is_unsure,
 };
 use musubi_store::{ReviewCandidate, ReviewItem};
 
 use crate::inner::now;
 use crate::library::LibraryRow;
 use crate::matching::{
-    ChainLink, MIN_GUESS, MatchQuery, SeasonSpan, Verdict, plan_chain, rank, search_terms, verdict,
+    Carry, ChainLink, MIN_GUESS, MatchQuery, SMALL_DRIFT, SeasonSpan, Verdict, needs_more,
+    plan_chain, plan_season, rank, search_terms, season_match_title, season_search_terms, verdict,
 };
 use crate::{Core, CoreEvent, Result};
 
@@ -21,6 +23,13 @@ const MOVIE_FORMATS: [&str; 1] = ["MOVIE"];
 const CHAIN_FORMATS: [&str; 3] = ["TV", "TV_SHORT", "ONA"];
 const MAX_CHAIN: usize = 10;
 const MAX_REVIEW_CANDIDATES: usize = 8;
+/// So viele Fortsetzungen tief wird über Filme oder OVAs hinweg nach der nächsten Staffel gesucht.
+const MAX_SEQUEL_DEPTH: usize = 3;
+/// Obergrenze für Relations-Abfragen pro Suche, wegen des Rate-Limits.
+const MAX_RELATION_LOOKUPS: usize = 6;
+const META_MATCHING_VERSION: &str = "matching_version";
+/// Version 2 ordnet jede Staffel einzeln zu. Ältere Zuordnungen werden einmal neu geplant.
+const MATCHING_VERSION: u32 = 2;
 
 static MATCH_RUNNING: AtomicBool = AtomicBool::new(false);
 
@@ -39,22 +48,80 @@ pub enum MatchOutcome {
     NoMatch,
 }
 
+/// Eine Jellyfin-Staffel: Episodenbereich und, falls bekannt, ihre Metadaten.
+#[derive(Debug, Clone)]
+struct SeasonInfo {
+    span: SeasonSpan,
+    meta: Option<Season>,
+}
+
+/// Das Werk, mit dem eine Staffel beginnt.
+#[derive(Debug, Clone)]
+struct Anchor {
+    link: ChainLink,
+    /// Episoden des Werks, die schon frühere Staffeln belegen.
+    used: u32,
+    source: MappingSource,
+    confidence: f64,
+}
+
+impl Anchor {
+    fn new(media: &Media, source: MappingSource, confidence: f64) -> Self {
+        Self {
+            link: link_of(media),
+            used: 0,
+            source,
+            confidence,
+        }
+    }
+}
+
+/// Quelle einer Staffel, deren Werk über die Fortsetzungen der Vorstaffel gefunden wurde.
+fn inherited(source: MappingSource, manual_run: bool) -> MappingSource {
+    match source {
+        MappingSource::Guess => MappingSource::Guess,
+        MappingSource::Manual if manual_run => MappingSource::Manual,
+        _ => MappingSource::Title,
+    }
+}
+
+fn spans(seasons: &[SeasonInfo]) -> Vec<SeasonSpan> {
+    seasons.iter().map(|s| s.span).collect()
+}
+
+/// Gesamturteil über alle regulären Staffeln eines Titels.
+fn outcome_of(seasons: &[SeasonInfo], mappings: &[Mapping]) -> MatchOutcome {
+    if mappings.is_empty() {
+        return MatchOutcome::NoMatch;
+    }
+    let all_covered = seasons
+        .iter()
+        .filter(|s| s.span.season > 0)
+        .all(|s| mappings.iter().any(|m| m.season == s.span.season));
+    if all_covered && !is_unsure(mappings) {
+        MatchOutcome::Mapped
+    } else {
+        MatchOutcome::Unsure
+    }
+}
+
 impl Core {
-    async fn seasons_of(&self, item: &LibraryItem) -> Result<Vec<SeasonSpan>> {
+    /// Staffeln eines Titels samt Specials (Staffel 0). Filme gelten als Staffel 1 mit einer Folge.
+    async fn seasons_of(&self, item: &LibraryItem) -> Result<Vec<SeasonInfo>> {
         if item.kind == ItemKind::Movie {
-            return Ok(vec![SeasonSpan {
-                season: 1,
-                first_episode: 1,
-                count: 1,
+            return Ok(vec![SeasonInfo {
+                span: SeasonSpan {
+                    season: 1,
+                    first_episode: 1,
+                    count: 1,
+                },
+                meta: None,
             }]);
         }
         let session = self.require_jellyfin()?;
         let episodes = session.client.episodes(&session.user_id, &item.id).await?;
         let mut spans: Vec<SeasonSpan> = Vec::new();
-        for episode in episodes
-            .iter()
-            .filter(|e| e.season_number > 0 && e.number > 0)
-        {
+        for episode in episodes.iter().filter(|e| e.number > 0) {
             match spans
                 .last_mut()
                 .filter(|s| s.season == episode.season_number)
@@ -67,61 +134,37 @@ impl Core {
                 }),
             }
         }
-        Ok(spans)
+        // Die Metadaten sind eine Hilfe, ohne sie geht es auch.
+        let metas = match session.client.seasons(&session.user_id, &item.id).await {
+            Ok(metas) => metas,
+            Err(error) => {
+                tracing::debug!(item = %item.name, %error, "season details unavailable");
+                Vec::new()
+            }
+        };
+        Ok(spans
+            .into_iter()
+            .map(|span| SeasonInfo {
+                meta: metas.iter().find(|m| m.number == span.season).cloned(),
+                span,
+            })
+            .collect())
     }
 
-    /// Folgt den Fortsetzungen, bis genug Episoden abgedeckt sind.
-    async fn build_chain(&self, first: &Media, needed: u32) -> Result<Vec<ChainLink>> {
-        let session = self.require_anilist()?;
-        let mut chain = vec![link_of(first)];
-        let mut covered = first.episodes.unwrap_or(needed);
-        let mut current = first.id;
-        while covered < needed && chain.len() < MAX_CHAIN {
-            let (_, relations) = session.client.relations(current).await?;
-            let next = relations.into_iter().find(|r| {
-                r.relation == "SEQUEL"
-                    && r.media
-                        .format
-                        .as_deref()
-                        .is_some_and(|f| CHAIN_FORMATS.contains(&f))
-            });
-            let Some(next) = next else { break };
-            covered += next.media.episodes.unwrap_or(needed);
-            current = next.media.id;
-            chain.push(link_of(&next.media));
-        }
-        Ok(chain)
-    }
-
-    async fn apply_mapping(
+    async fn media_by_ids(
         &self,
-        item: &LibraryItem,
-        media: &Media,
-        source: MappingSource,
-        confidence: f64,
-    ) -> Result<()> {
-        let spans = self.seasons_of(item).await?;
-        let needed = spans.iter().map(|s| s.count).sum();
-        let chain = self.build_chain(media, needed).await?;
-        let mappings = plan_chain(&item.id, &spans, &chain, source, confidence);
-        self.inner.db.replace_mappings(&item.id, mappings).await?;
-        self.inner.emit(CoreEvent::MappingsChanged);
-        Ok(())
-    }
-
-    async fn media_from_provider_ids(&self, item: &LibraryItem) -> Result<Option<Media>> {
+        anilist: Option<&str>,
+        mal: Option<&str>,
+    ) -> Result<Option<Media>> {
         let session = self.require_anilist()?;
-        if let Some(id) = item.provider_id(&["AniList"]).and_then(|v| v.parse().ok()) {
+        if let Some(id) = anilist.and_then(|v| v.trim().parse().ok()) {
             match session.client.media(id).await {
                 Ok(media) => return Ok(Some(media)),
                 Err(AniListError::NotFound) => {}
                 Err(e) => return Err(e.into()),
             }
         }
-        if let Some(id) = item
-            .provider_id(&["MyAnimeList", "Mal"])
-            .and_then(|v| v.parse().ok())
-        {
+        if let Some(id) = mal.and_then(|v| v.trim().parse().ok()) {
             match session.client.media_by_mal(id, MediaKind::Anime).await {
                 Ok(media) => return Ok(Some(media)),
                 Err(AniListError::NotFound) => {}
@@ -131,16 +174,267 @@ impl Core {
         Ok(None)
     }
 
-    /// Ordnet einen Titel seinem besten Treffer zu. Die Kandidaten bleiben für spätere Änderungen
-    /// gespeichert und merken zugleich, dass der Titel schon versucht wurde.
-    pub async fn auto_match(&self, item: &LibraryItem) -> Result<MatchOutcome> {
-        let session = self.require_anilist()?;
-        if let Some(media) = self.media_from_provider_ids(item).await? {
-            self.apply_mapping(item, &media, MappingSource::ProviderId, 1.0)
-                .await?;
-            return Ok(MatchOutcome::Mapped);
-        }
+    async fn media_from_provider_ids(&self, item: &LibraryItem) -> Result<Option<Media>> {
+        self.media_by_ids(
+            item.provider_id(&["AniList"]),
+            item.provider_id(&["MyAnimeList", "Mal"]),
+        )
+        .await
+    }
 
+    /// Provider-ID, die das Metadaten-Plugin an die Staffel selbst geschrieben hat.
+    async fn season_provider_anchor(
+        &self,
+        info: &SeasonInfo,
+        used: &HashSet<i64>,
+    ) -> Result<Option<Anchor>> {
+        let Some(meta) = &info.meta else {
+            return Ok(None);
+        };
+        let media = self
+            .media_by_ids(
+                meta.provider_id(&["AniList"]),
+                meta.provider_id(&["MyAnimeList", "Mal"]),
+            )
+            .await?;
+        // Manche Plugins kopieren die ID der Serie in jede Staffel. Die zählt hier nicht.
+        Ok(media
+            .filter(|m| !used.contains(&m.id))
+            .map(|m| Anchor::new(&m, MappingSource::ProviderId, 1.0)))
+    }
+
+    /// Die nächste noch nicht vergebene TV-Fortsetzung. Filme, OVAs und Specials dazwischen
+    /// werden übersprungen, ihre Fortsetzungen aber weiter verfolgt.
+    async fn next_sequel(&self, media_id: i64, used: &HashSet<i64>) -> Result<Option<Media>> {
+        let session = self.require_anilist()?;
+        let mut queue = VecDeque::from([(media_id, 0usize)]);
+        let mut seen = HashSet::from([media_id]);
+        let mut lookups = 0;
+        while let Some((id, depth)) = queue.pop_front() {
+            if lookups == MAX_RELATION_LOOKUPS {
+                break;
+            }
+            lookups += 1;
+            let (_, relations) = session.client.relations(id).await?;
+            let sequels: Vec<Media> = relations
+                .into_iter()
+                .filter(|r| r.relation == "SEQUEL" && r.media.kind == MediaKind::Anime)
+                .map(|r| r.media)
+                .collect();
+            if let Some(next) = sequels.iter().find(|m| {
+                !used.contains(&m.id)
+                    && m.format
+                        .as_deref()
+                        .is_some_and(|f| CHAIN_FORMATS.contains(&f))
+            }) {
+                return Ok(Some(next.clone()));
+            }
+            if depth + 1 < MAX_SEQUEL_DEPTH {
+                for media in sequels {
+                    if seen.insert(media.id) {
+                        queue.push_back((media.id, depth + 1));
+                    }
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    /// Werke für eine Staffel ab ihrem Anker. Weitere Cours kommen nur dazu, wenn mehr als ein
+    /// paar Episoden fehlen.
+    async fn season_chain(
+        &self,
+        anchor: &Anchor,
+        count: u32,
+        used: &mut HashSet<i64>,
+    ) -> Result<Vec<ChainLink>> {
+        let mut chain = vec![anchor.link.clone()];
+        let mut covered = anchor.link.episodes.map(|e| e.saturating_sub(anchor.used));
+        while needs_more(covered, count) && chain.len() < MAX_CHAIN {
+            let last = chain.last().map_or(anchor.link.media_id, |l| l.media_id);
+            let Some(next) = self.next_sequel(last, used).await? else {
+                break;
+            };
+            used.insert(next.id);
+            covered = covered.zip(next.episodes).map(|(c, e)| c + e);
+            chain.push(link_of(&next));
+        }
+        Ok(chain)
+    }
+
+    /// Sucht eine einzelne Staffel auf AniList, z. B. „Titel Season 2“.
+    async fn search_season(
+        &self,
+        item: &LibraryItem,
+        info: &SeasonInfo,
+        used: &HashSet<i64>,
+    ) -> Result<Option<Anchor>> {
+        let session = self.require_anilist()?;
+        let name = info.meta.as_ref().map(|m| m.name.as_str());
+        let mut candidates = Vec::new();
+        for term in season_search_terms(&item.name, info.span.season, name) {
+            candidates = session
+                .client
+                .search(&term, MediaKind::Anime, Some(&SERIES_FORMATS), 15)
+                .await?;
+            candidates.retain(|m| !used.contains(&m.id));
+            if !candidates.is_empty() {
+                break;
+            }
+        }
+        let title = season_match_title(&item.name, info.span.season);
+        let query = MatchQuery {
+            title: &title,
+            year: info.meta.as_ref().and_then(|m| m.year),
+            kind: ItemKind::Series,
+            episodes: Some(info.span.count),
+        };
+        let ranked = rank(&query, &candidates);
+        let source = match verdict(&ranked) {
+            Verdict::Sure => MappingSource::Title,
+            Verdict::Unsure => MappingSource::Guess,
+            Verdict::NoMatch => return Ok(None),
+        };
+        let (media, score) = ranked[0];
+        Ok(Some(Anchor::new(media, source, score.min(1.0))))
+    }
+
+    /// Ordnet jede Staffel einzeln zu. Staffeln in `keep` bleiben unverändert und dienen der
+    /// nächsten Staffel als Ausgangspunkt. `start` gilt für die erste Staffel.
+    async fn plan_series(
+        &self,
+        item: &LibraryItem,
+        seasons: &[SeasonInfo],
+        mut start: Option<Anchor>,
+        keep: &[Mapping],
+        manual_run: bool,
+    ) -> Result<Vec<Mapping>> {
+        let mut out: Vec<Mapping> = Vec::new();
+        let mut used: HashSet<i64> = keep.iter().map(|m| m.media_id).collect();
+        let mut carry: Option<Carry> = None;
+        // Letztes Werk der Vorstaffel mit Quelle und Sicherheit.
+        let mut previous: Option<(i64, MappingSource, f64)> = None;
+        let regular = seasons.iter().filter(|s| s.span.season > 0);
+        for (index, info) in regular.enumerate() {
+            let span = info.span;
+            let kept: Vec<Mapping> = keep
+                .iter()
+                .filter(|m| m.season == span.season)
+                .cloned()
+                .collect();
+            if let Some(last) = kept.iter().max_by_key(|m| m.ep_start) {
+                previous = Some((last.media_id, last.source, last.confidence));
+                carry = None;
+                out.extend(kept);
+                continue;
+            }
+
+            let mut anchor = None;
+            if index == 0
+                && start
+                    .as_ref()
+                    .is_some_and(|a| a.source == MappingSource::Manual)
+            {
+                anchor = start.take();
+            }
+            if anchor.is_none() {
+                anchor = self.season_provider_anchor(info, &used).await?;
+            }
+            if anchor.is_none() && index == 0 {
+                anchor = start.take();
+            }
+            if anchor.is_none()
+                && let Some(c) = carry.as_ref().filter(|c| c.continues_into(&span))
+                && let Some((_, source, confidence)) = previous
+            {
+                anchor = Some(Anchor {
+                    link: c.link.clone(),
+                    used: c.used,
+                    source: inherited(source, manual_run),
+                    confidence,
+                });
+            }
+            if anchor.is_none()
+                && let Some((media_id, source, confidence)) = previous
+                && let Some(next) = self.next_sequel(media_id, &used).await?
+            {
+                anchor = Some(Anchor::new(
+                    &next,
+                    inherited(source, manual_run),
+                    confidence,
+                ));
+            }
+            if anchor.is_none() {
+                anchor = self.search_season(item, info, &used).await?;
+            }
+            let Some(anchor) = anchor else {
+                // Nur diese Staffel bleibt offen. Die nächste sucht selbst, statt an einem
+                // falschen Vorgänger weiterzumachen.
+                carry = None;
+                previous = None;
+                continue;
+            };
+
+            used.insert(anchor.link.media_id);
+            let chain = self.season_chain(&anchor, span.count, &mut used).await?;
+            let plan = plan_season(
+                &item.id,
+                &span,
+                &chain,
+                anchor.used,
+                anchor.source,
+                anchor.confidence,
+            );
+            let mut source = anchor.source;
+            let mut mappings = plan.mappings;
+            // Ein großer Rest ohne Werk heißt, dass etwas nicht zusammenpasst.
+            if plan.unmapped > SMALL_DRIFT && source != MappingSource::Manual {
+                source = MappingSource::Guess;
+                for mapping in &mut mappings {
+                    mapping.source = source;
+                }
+            }
+            previous = mappings
+                .last()
+                .map(|m| (m.media_id, source, anchor.confidence));
+            carry = plan.carry;
+            out.extend(mappings);
+        }
+        Ok(out)
+    }
+
+    /// Plant alle Zuordnungen eines Titels ab einem Startwerk.
+    async fn plan_from(
+        &self,
+        item: &LibraryItem,
+        seasons: &[SeasonInfo],
+        start: Option<Anchor>,
+        keep: &[Mapping],
+        manual_run: bool,
+    ) -> Result<Vec<Mapping>> {
+        if item.kind == ItemKind::Movie {
+            let Some(start) = start else {
+                return Ok(Vec::new());
+            };
+            return Ok(plan_chain(
+                &item.id,
+                &spans(seasons),
+                &[start.link],
+                start.source,
+                start.confidence,
+            ));
+        }
+        self.plan_series(item, seasons, start, keep, manual_run)
+            .await
+    }
+
+    /// Sucht den Titel selbst auf AniList und bewertet die Kandidaten.
+    async fn search_title(
+        &self,
+        item: &LibraryItem,
+        seasons: &[SeasonInfo],
+    ) -> Result<(Option<Anchor>, ReviewItem)> {
+        let session = self.require_anilist()?;
         let formats: &[&str] = if item.kind == ItemKind::Movie {
             &MOVIE_FORMATS
         } else {
@@ -158,7 +452,10 @@ impl Core {
         }
         let episodes = match item.kind {
             ItemKind::Movie => None,
-            ItemKind::Series => self.seasons_of(item).await?.first().map(|s| s.count),
+            ItemKind::Series => seasons
+                .iter()
+                .find(|s| s.span.season > 0)
+                .map(|s| s.span.count),
         };
         let query = MatchQuery {
             title: &item.name,
@@ -167,19 +464,15 @@ impl Core {
             episodes,
         };
         let ranked = rank(&query, &candidates);
-
-        let result = verdict(&ranked);
-        let accepted = match result {
+        let source = match verdict(&ranked) {
             Verdict::Sure => Some(MappingSource::Title),
             Verdict::Unsure => Some(MappingSource::Guess),
             Verdict::NoMatch => None,
         };
-        if let Some(source) = accepted {
+        let anchor = source.map(|source| {
             let (media, score) = ranked[0];
-            self.apply_mapping(item, media, source, score.min(1.0))
-                .await?;
-        }
-        // Erst nach `apply_mapping`, das gespeicherte Kandidaten entfernt.
+            Anchor::new(media, source, score.min(1.0))
+        });
         let review = ReviewItem {
             jellyfin_id: item.id.clone(),
             title: item.name.clone(),
@@ -189,13 +482,99 @@ impl Core {
                 .map(|(media, score)| candidate_of(media, *score))
                 .collect(),
         };
-        self.inner.db.set_review(review, now()).await?;
+        Ok((anchor, review))
+    }
+
+    /// Ordnet einen Titel zu, bei Serien jede Staffel für sich. `keep` sind Zuordnungen, die
+    /// bleiben (manuelle Staffeln), `start` ein bereits bekanntes Werk für die erste Staffel.
+    async fn match_title(
+        &self,
+        item: &LibraryItem,
+        seasons: &[SeasonInfo],
+        keep: &[Mapping],
+        start: Option<Anchor>,
+    ) -> Result<MatchOutcome> {
+        let first_regular = seasons.iter().find(|s| s.span.season > 0);
+        // Fängt die Bibliothek erst mit einer späteren Staffel an, passt die Suche nach dem
+        // Serientitel nicht. Die Staffel sucht dann selbst.
+        let title_fits_first = first_regular.is_none_or(|s| s.span.season == 1)
+            && !first_regular.is_some_and(|s| keep.iter().any(|m| m.season == s.span.season));
+        let mut review = None;
+        let start = match start {
+            Some(start) => Some(start),
+            None if !title_fits_first => None,
+            None => match self.media_from_provider_ids(item).await? {
+                Some(media) => Some(Anchor::new(&media, MappingSource::ProviderId, 1.0)),
+                None => {
+                    let (anchor, found) = self.search_title(item, seasons).await?;
+                    review = Some(found);
+                    anchor
+                }
+            },
+        };
+        let mappings = self.plan_from(item, seasons, start, keep, false).await?;
+        let outcome = outcome_of(seasons, &mappings);
+        self.inner.db.replace_mappings(&item.id, mappings).await?;
+        // Erst nach `replace_mappings`, das gespeicherte Kandidaten entfernt. Ohne Treffer merkt
+        // sich ein leerer Eintrag, dass der Titel schon versucht wurde.
+        let review = review.or_else(|| {
+            (outcome == MatchOutcome::NoMatch).then(|| ReviewItem {
+                jellyfin_id: item.id.clone(),
+                title: item.name.clone(),
+                candidates: Vec::new(),
+            })
+        });
+        if let Some(review) = review {
+            self.inner.db.set_review(review, now()).await?;
+        }
         self.inner.emit(CoreEvent::MappingsChanged);
-        Ok(match result {
-            Verdict::Sure => MatchOutcome::Mapped,
-            Verdict::Unsure => MatchOutcome::Unsure,
-            Verdict::NoMatch => MatchOutcome::NoMatch,
-        })
+        Ok(outcome)
+    }
+
+    /// Ordnet einen Titel seinem besten Treffer zu, bei Serien jede Staffel einzeln. Die
+    /// Kandidaten bleiben für spätere Änderungen gespeichert und merken zugleich, dass der Titel
+    /// schon versucht wurde.
+    pub async fn auto_match(&self, item: &LibraryItem) -> Result<MatchOutcome> {
+        let seasons = self.seasons_of(item).await?;
+        self.match_title(item, &seasons, &[], None).await
+    }
+
+    /// Plant eine Serie aus älteren Versionen pro Staffel neu. Manuelle Staffeln bleiben, die
+    /// erste Staffel behält ihr Werk. `None`, wenn es nur eine Staffel gibt.
+    async fn rematch_by_season(
+        &self,
+        item: &LibraryItem,
+        current: &[Mapping],
+    ) -> Result<Option<MatchOutcome>> {
+        let seasons = self.seasons_of(item).await?;
+        let regular: Vec<&SeasonInfo> = seasons.iter().filter(|s| s.span.season > 0).collect();
+        let Some(first) = regular.first().filter(|_| regular.len() >= 2) else {
+            return Ok(None);
+        };
+        let keep: Vec<Mapping> = current
+            .iter()
+            .filter(|m| m.source == MappingSource::Manual)
+            .cloned()
+            .collect();
+        let previous = current
+            .iter()
+            .filter(|m| m.season == first.span.season && m.source != MappingSource::Manual)
+            .min_by_key(|m| m.ep_start);
+        let start = match previous {
+            Some(mapping) => {
+                let session = self.require_anilist()?;
+                let media = session.client.media(mapping.media_id).await?;
+                let used = (i64::from(mapping.ep_start) + i64::from(mapping.offset) - 1).max(0);
+                Some(Anchor {
+                    used: u32::try_from(used).unwrap_or(0),
+                    ..Anchor::new(&media, mapping.source, mapping.confidence)
+                })
+            }
+            None => None,
+        };
+        self.match_title(item, &seasons, &keep, start)
+            .await
+            .map(Some)
     }
 
     /// Übernimmt Titel, die in früheren Versionen auf der Prüfliste gelandet sind.
@@ -219,8 +598,16 @@ impl Core {
             };
             let applied = async {
                 let media = session.client.media(media_id).await?;
-                self.apply_mapping(&row.item, &media, MappingSource::Guess, score)
-                    .await
+                let seasons = self.seasons_of(&row.item).await?;
+                let start = Anchor::new(&media, MappingSource::Guess, score);
+                let mappings = self
+                    .plan_from(&row.item, &seasons, Some(start), &[], false)
+                    .await?;
+                self.inner
+                    .db
+                    .replace_mappings(&row.item.id, mappings)
+                    .await?;
+                Result::Ok(())
             };
             match applied.await {
                 Ok(()) => {
@@ -230,13 +617,28 @@ impl Core {
                 Err(error) => tracing::warn!(item = %row.item.name, %error, "matching failed"),
             }
         }
+        if !adopted.is_empty() {
+            self.inner.emit(CoreEvent::MappingsChanged);
+        }
         Ok(adopted)
+    }
+
+    async fn matching_version(&self) -> Result<u32> {
+        Ok(self
+            .inner
+            .db
+            .meta_get(META_MATCHING_VERSION)
+            .await?
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0))
     }
 
     /// Ordnet alle noch offenen Titel zu. Läuft pro Prozess nur einmal gleichzeitig.
     ///
     /// Titel ohne Treffer werden nur mit `retry_unmatched` erneut gesucht. Ohne Änderung bleibt
-    /// `LibraryChanged` aus, denn die Oberfläche startet diesen Lauf selbst.
+    /// `LibraryChanged` aus, denn die Oberfläche startet diesen Lauf selbst. Nach einem Update
+    /// werden automatische Zuordnungen von Serien mit mehreren Staffeln einmal pro Staffel neu
+    /// geplant.
     pub async fn match_all(&self, retry_unmatched: bool) -> Result<()> {
         if MATCH_RUNNING.swap(true, Ordering::SeqCst) {
             return Ok(());
@@ -244,39 +646,53 @@ impl Core {
         let _guard = MatchRunGuard;
         let rows = self.library(&LibraryQuery::default()).await?;
         let adopted = self.adopt_open_reviews(&rows).await?;
+        let reviews = self.inner.db.reviews().await?;
         let tried: HashSet<String> = if retry_unmatched {
             HashSet::new()
         } else {
-            self.inner
-                .db
-                .reviews()
-                .await?
-                .into_iter()
-                .map(|r| r.jellyfin_id)
-                .collect()
+            reviews.iter().map(|r| r.jellyfin_id.clone()).collect()
         };
-        let pending: Vec<LibraryItem> = rows
-            .into_iter()
+        let upgrade: Vec<&LibraryRow> = if self.matching_version().await? < MATCHING_VERSION {
+            rows.iter()
+                .filter(|r| {
+                    r.item.kind == ItemKind::Series
+                        && !adopted.contains(&r.item.id)
+                        && r.mappings.iter().any(|m| m.source != MappingSource::Manual)
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let pending: Vec<&LibraryItem> = rows
+            .iter()
             .filter(|r| {
                 r.mappings.is_empty()
                     && !adopted.contains(&r.item.id)
                     && !tried.contains(&r.item.id)
             })
-            .map(|r| r.item)
+            .map(|r| &r.item)
             .collect();
-        if pending.is_empty() && adopted.is_empty() {
+        if pending.is_empty() && adopted.is_empty() && upgrade.is_empty() {
+            self.inner
+                .db
+                .meta_set(META_MATCHING_VERSION, &MATCHING_VERSION.to_string())
+                .await?;
             return Ok(());
         }
-        let total = pending.len();
+        let total = pending.len() + upgrade.len();
         self.inner.emit(CoreEvent::MatchProgress { done: 0, total });
         let mut mapped = 0;
         let mut unsure = adopted.len();
         let mut unmatched = 0;
+        let mut replanned = 0;
+        let mut count = |outcome: &MatchOutcome| match outcome {
+            MatchOutcome::Mapped => mapped += 1,
+            MatchOutcome::Unsure => unsure += 1,
+            MatchOutcome::NoMatch => unmatched += 1,
+        };
         for (index, item) in pending.iter().enumerate() {
             match self.auto_match(item).await {
-                Ok(MatchOutcome::Mapped) => mapped += 1,
-                Ok(MatchOutcome::Unsure) => unsure += 1,
-                Ok(MatchOutcome::NoMatch) => unmatched += 1,
+                Ok(outcome) => count(&outcome),
                 Err(error) => tracing::warn!(item = %item.name, %error, "matching failed"),
             }
             self.inner.emit(CoreEvent::MatchProgress {
@@ -284,15 +700,35 @@ impl Core {
                 total,
             });
         }
-        if mapped + unsure > 0 {
+        for (index, row) in upgrade.iter().enumerate() {
+            match self.rematch_by_season(&row.item, &row.mappings).await {
+                Ok(Some(_)) => replanned += 1,
+                Ok(None) => {}
+                Err(error) => tracing::warn!(item = %row.item.name, %error, "re-matching failed"),
+            }
+            // Gespeicherte Vorschläge bleiben für den Ändern-Dialog erhalten.
+            if let Some(review) = reviews.iter().find(|r| r.jellyfin_id == row.item.id) {
+                self.inner.db.set_review(review.clone(), now()).await?;
+            }
+            self.inner.emit(CoreEvent::MatchProgress {
+                done: pending.len() + index + 1,
+                total,
+            });
+        }
+        self.inner
+            .db
+            .meta_set(META_MATCHING_VERSION, &MATCHING_VERSION.to_string())
+            .await?;
+        if mapped + unsure + replanned > 0 {
             self.inner.emit(CoreEvent::LibraryChanged);
         }
-        self.inner.emit(CoreEvent::Notice {
-            ok: true,
-            message: format!(
-                "Matching finished: {mapped} matched, {unsure} unsure, {unmatched} without a match"
-            ),
-        });
+        let mut message = format!(
+            "Matching finished: {mapped} matched, {unsure} unsure, {unmatched} without a match"
+        );
+        if replanned > 0 {
+            message.push_str(&format!(", {replanned} re-matched season by season"));
+        }
+        self.inner.emit(CoreEvent::Notice { ok: true, message });
         Ok(())
     }
 
@@ -308,27 +744,77 @@ impl Core {
         Ok(self.inner.db.mappings_for(jellyfin_id).await?)
     }
 
-    /// Manuelle Zuordnung. Fortsetzungen werden auf Wunsch automatisch mit verteilt.
+    /// Manuelle Zuordnung für alle Staffeln. Fortsetzungen werden auf Wunsch mit verteilt.
     pub async fn map_manually(
         &self,
         item: &LibraryItem,
         media_id: i64,
         follow_sequels: bool,
     ) -> Result<()> {
+        self.map_season_manually(item, None, media_id, follow_sequels)
+            .await
+    }
+
+    /// Manuelle Zuordnung eines Werks. Mit `season` ändert sich nur diese Staffel, die übrigen
+    /// bleiben, wie sie sind. `follow` verteilt bei allen Staffeln die Fortsetzungen auf spätere
+    /// Staffeln, bei einer Staffel weitere Cours innerhalb dieser Staffel.
+    pub async fn map_season_manually(
+        &self,
+        item: &LibraryItem,
+        season: Option<u32>,
+        media_id: i64,
+        follow: bool,
+    ) -> Result<()> {
         let session = self.require_anilist()?;
         let media = session.client.media(media_id).await?;
-        if follow_sequels {
-            return self
-                .apply_mapping(item, &media, MappingSource::Manual, 1.0)
-                .await;
-        }
-        let spans = self.seasons_of(item).await?;
-        let chain = [ChainLink {
-            media_id: media.id,
+        let seasons = self.seasons_of(item).await?;
+        let anchor = Anchor::new(&media, MappingSource::Manual, 1.0);
+        let open = ChainLink {
             episodes: None,
-            title: media.title.preferred().to_owned(),
-        }];
-        let mappings = plan_chain(&item.id, &spans, &chain, MappingSource::Manual, 1.0);
+            ..link_of(&media)
+        };
+        let mappings = match season {
+            None if follow && item.kind == ItemKind::Series => {
+                self.plan_series(item, &seasons, Some(anchor), &[], true)
+                    .await?
+            }
+            None => {
+                let regular: Vec<SeasonSpan> = spans(&seasons)
+                    .into_iter()
+                    .filter(|s| s.season > 0)
+                    .collect();
+                plan_chain(&item.id, &regular, &[open], MappingSource::Manual, 1.0)
+            }
+            Some(number) => {
+                let span = seasons
+                    .iter()
+                    .find(|s| s.span.season == number)
+                    .map(|s| s.span)
+                    .unwrap_or(SeasonSpan {
+                        season: number,
+                        first_episode: 1,
+                        count: media.episodes.unwrap_or(1),
+                    });
+                let mut kept: Vec<Mapping> = self
+                    .inner
+                    .db
+                    .mappings_for(&item.id)
+                    .await?
+                    .into_iter()
+                    .filter(|m| m.season != number)
+                    .collect();
+                let chain = if follow {
+                    let mut used: HashSet<i64> = kept.iter().map(|m| m.media_id).collect();
+                    used.insert(media.id);
+                    self.season_chain(&anchor, span.count, &mut used).await?
+                } else {
+                    vec![open]
+                };
+                let plan = plan_season(&item.id, &span, &chain, 0, MappingSource::Manual, 1.0);
+                kept.extend(plan.mappings);
+                kept
+            }
+        };
         self.inner.db.replace_mappings(&item.id, mappings).await?;
         self.inner.emit(CoreEvent::MappingsChanged);
         Ok(())
@@ -344,14 +830,38 @@ impl Core {
         Ok(())
     }
 
-    /// Macht aus einem unsicheren Treffer eine feste Zuordnung.
-    pub async fn confirm_mapping(&self, jellyfin_id: &str) -> Result<()> {
+    /// Macht aus unsicheren Treffern feste Zuordnungen, mit `season` nur für diese Staffel.
+    pub async fn confirm_season(&self, jellyfin_id: &str, season: Option<u32>) -> Result<()> {
         let mut mappings = self.inner.db.mappings_for(jellyfin_id).await?;
-        for mapping in &mut mappings {
+        for mapping in mappings
+            .iter_mut()
+            .filter(|m| season.is_none_or(|s| m.season == s))
+        {
             mapping.source = MappingSource::Manual;
             mapping.confidence = 1.0;
         }
         self.set_mappings(jellyfin_id, mappings).await
+    }
+
+    /// Macht aus einem unsicheren Treffer eine feste Zuordnung.
+    pub async fn confirm_mapping(&self, jellyfin_id: &str) -> Result<()> {
+        self.confirm_season(jellyfin_id, None).await
+    }
+
+    /// Entfernt die Zuordnung einer Staffel. Bleibt keine übrig, gilt das wie `unmap`.
+    pub async fn unmap_season(&self, jellyfin_id: &str, season: u32) -> Result<()> {
+        let rest: Vec<Mapping> = self
+            .inner
+            .db
+            .mappings_for(jellyfin_id)
+            .await?
+            .into_iter()
+            .filter(|m| m.season != season)
+            .collect();
+        if rest.is_empty() {
+            return self.unmap(jellyfin_id).await;
+        }
+        self.set_mappings(jellyfin_id, rest).await
     }
 
     /// Entfernt die Zuordnung. Der Titel gilt als versucht, damit der nächste automatische Lauf

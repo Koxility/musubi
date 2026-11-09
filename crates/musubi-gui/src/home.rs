@@ -33,7 +33,9 @@ pub enum Msg {
     Loaded(Result<HomeShelves, String>),
     Play(ShelfItem),
     Open(ShelfItem),
-    Opened(Result<LibraryItem, String>),
+    /// Mit der Navigations-Generation beim Klick: Wer inzwischen die Seite gewechselt hat,
+    /// soll nicht in eine Detailseite zurückgeworfen werden.
+    Opened(u64, Result<LibraryItem, String>),
 }
 
 pub fn load(app: &mut App) -> Task<Message> {
@@ -70,16 +72,18 @@ pub fn update(app: &mut App, msg: Msg) -> Task<Message> {
         }
         Msg::Open(item) => {
             let core = app.core.clone();
+            let generation = app.nav_generation;
             return ui::perform(
                 async move { core.library_item(&item.library_id).await },
-                |r| Message::Home(Msg::Opened(r)),
+                move |r| Message::Home(Msg::Opened(generation, r)),
             );
         }
-        Msg::Opened(Ok(item)) => {
-            app.page = Page::Home;
+        Msg::Opened(generation, _) if generation != app.nav_generation => {}
+        Msg::Opened(_, Ok(item)) if app.page == Page::Home => {
             return library::open_detail(app, item);
         }
-        Msg::Opened(Err(error)) => app.toast(error, false),
+        Msg::Opened(_, Ok(_)) => {}
+        Msg::Opened(_, Err(error)) => app.toast(error, false),
     }
     Task::none()
 }

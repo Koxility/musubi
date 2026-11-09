@@ -6,6 +6,7 @@
 mod anilist;
 mod app;
 mod home;
+mod icons;
 mod images;
 mod library;
 mod mapping;

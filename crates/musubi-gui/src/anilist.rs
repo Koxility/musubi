@@ -331,13 +331,19 @@ fn open_editor(app: &mut App, entry: ListEntry) {
 }
 
 /// Öffnet den Eintrag zu einem Bibliothekstitel.
-pub fn open_editor_for(app: &mut App, item: &LibraryItem) {
+/// Mit `season` gilt der Eintrag dieser Staffel, sonst der des ersten zugeordneten Werks.
+pub fn open_editor_for(app: &mut App, item: &LibraryItem, season: Option<u32>) {
     let entry = app
         .library
         .rows
         .iter()
         .find(|r| r.item.id == item.id)
-        .and_then(|r| r.mappings.first())
+        .and_then(|r| {
+            r.mappings
+                .iter()
+                .filter(|m| season.is_none_or(|s| m.season == s))
+                .min_by_key(|m| (m.season, m.ep_start))
+        })
         .and_then(|m| app.core.entry_for(m.media_id));
     match entry {
         Some(entry) => open_editor(app, entry),

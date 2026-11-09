@@ -6,11 +6,13 @@ use iced::widget::{
 };
 use iced::{Bottom, Center, Element, Fill, Length, Task};
 use musubi_core::domain::{
-    ItemKind, Library, LibraryFilters, LibraryItem, LibraryQuery, LibrarySort, is_unsure,
+    ItemKind, Library, LibraryFilters, LibraryItem, LibraryQuery, LibrarySort, Mapping,
+    MappingSource, is_unsure, season_mappings,
 };
 use musubi_core::{EpisodeRow, LibraryRow};
 
-use crate::app::{App, Message};
+use crate::app::{App, Message, Page};
+use crate::icons::Icon;
 use crate::images::ImageKey;
 use crate::{anilist, mapping, theme, ui};
 
@@ -29,6 +31,8 @@ const STATUSES: [&str; 3] = [ALL_STATUSES, "Continuing", "Ended"];
 
 pub struct Detail {
     pub item: LibraryItem,
+    /// Die Seite, auf der die Detailansicht geöffnet wurde. Nur dort wird sie gezeigt.
+    pub origin: Page,
     episodes: Vec<EpisodeRow>,
     loading: bool,
     season: Option<u32>,
@@ -188,8 +192,10 @@ pub fn reload_view(app: &mut App) -> Task<Message> {
 pub fn open_detail(app: &mut App, item: LibraryItem) -> Task<Message> {
     let id = item.id.clone();
     let series = item.kind == ItemKind::Series;
+    app.view_changed();
     app.library.detail = Some(Detail {
         item,
+        origin: app.page,
         episodes: vec![],
         loading: series,
         season: None,
@@ -231,7 +237,7 @@ pub fn update(app: &mut App, msg: Msg) -> Task<Message> {
             return load(app);
         }
         Msg::Open(item) => return open_detail(app, item),
-        Msg::CloseDetail => app.library.detail = None,
+        Msg::CloseDetail => app.close_detail(),
         Msg::Episodes(id, result) => match (&mut app.library.detail, result) {
             (Some(detail), Ok(episodes)) if detail.item.id == id => {
                 detail.loading = false;
@@ -263,9 +269,18 @@ pub fn update(app: &mut App, msg: Msg) -> Task<Message> {
                 Message::Notify,
             );
         }
-        Msg::EditEntry(item) => anilist::open_editor_for(app, &item),
-        Msg::Map(item) => mapping::open_change_dialog(app, item),
-        Msg::ConfirmMapping(id) => return mapping::confirm(app, id),
+        Msg::EditEntry(item) => {
+            let season = selected_season(app, &item.id);
+            anilist::open_editor_for(app, &item, season);
+        }
+        Msg::Map(item) => {
+            let season = selected_season(app, &item.id);
+            mapping::open_change_dialog(app, item, season);
+        }
+        Msg::ConfirmMapping(id) => {
+            let season = selected_season(app, &id);
+            return mapping::confirm(app, id, season);
+        }
     }
     Task::none()
 }
@@ -286,6 +301,25 @@ pub fn sync_mappings(app: &mut App) {
             .first()
             .and_then(|m| core.entry_for(m.media_id));
     }
+}
+
+/// Die auf der offenen Detailseite gewählte Staffel dieses Titels.
+pub fn selected_season(app: &App, id: &str) -> Option<u32> {
+    app.library
+        .detail
+        .as_ref()
+        .filter(|d| d.item.id == id && d.item.kind == ItemKind::Series)
+        .and_then(|d| d.season)
+}
+
+/// Staffeln, die die offene Detailseite dieses Titels kennt.
+pub fn detail_seasons(app: &App, id: &str) -> Vec<u32> {
+    app.library
+        .detail
+        .as_ref()
+        .filter(|d| d.item.id == id)
+        .map(seasons)
+        .unwrap_or_default()
 }
 
 /// Staffel der ersten ungesehenen Episode, sonst die erste vorhandene.
@@ -484,7 +518,11 @@ fn episode_row<'a>(
     if episode.played {
         meta = meta.push(ui::badge_row("Watched".to_owned(), theme::ACCENT));
     }
-    let label = if episode.played { "Unwatch" } else { "Watched" };
+    let (watched_icon, watched_color, watched_tip) = if episode.played {
+        (Icon::CheckCircle, theme::ACCENT, "Mark as unwatched")
+    } else {
+        (Icon::CheckCircle, theme::MUTED, "Mark as watched")
+    };
     container(
         row![
             button(thumb)
@@ -506,11 +544,25 @@ fn episode_row<'a>(
             ]
             .spacing(6)
             .width(Fill),
-            column![
-                ui::primary("Play", Msg::Play(item.clone(), Some(episode.id.clone()))),
-                ui::secondary(label, Msg::SetPlayed(episode.id.clone(), !episode.played)),
+            row![
+                ui::icon_button(
+                    Icon::Play,
+                    20.0,
+                    theme::TEXT,
+                    Some(Msg::Play(item.clone(), Some(episode.id.clone()))),
+                    "Play episode",
+                    theme::ghost_button,
+                ),
+                ui::icon_button(
+                    watched_icon,
+                    22.0,
+                    watched_color,
+                    Some(Msg::SetPlayed(episode.id.clone(), !episode.played)),
+                    watched_tip,
+                    theme::ghost_button,
+                ),
             ]
-            .spacing(6),
+            .spacing(8),
         ]
         .spacing(16)
         .align_y(Center),
@@ -518,6 +570,20 @@ fn episode_row<'a>(
     .padding(10)
     .style(theme::surface)
     .into()
+}
+
+/// Bewertung mit Stern-Icon, danach die übrigen Angaben.
+fn facts_line<'a>(rating: Option<f32>, facts: String) -> Element<'a, Msg> {
+    let mut line = row![].spacing(6).align_y(Center);
+    if let Some(rating) = rating {
+        line = line
+            .push(ui::icon(Icon::Star, 14.0, theme::ORANGE))
+            .push(text(format!("{rating:.1}")).size(13).color(theme::TEXT));
+        if !facts.is_empty() {
+            line = line.push(ui::muted("·"));
+        }
+    }
+    line.push(ui::muted(facts)).into()
 }
 
 fn seasons(detail: &Detail) -> Vec<u32> {
@@ -549,7 +615,16 @@ fn season_tabs(detail: &Detail) -> Element<'_, Msg> {
 
 fn anilist_summary<'a>(app: &'a App, item: &'a LibraryItem) -> Element<'a, Msg> {
     let row_data = app.library.rows.iter().find(|r| r.item.id == item.id);
-    let mapping = row_data.and_then(|r| r.mappings.first());
+    let season = selected_season(app, &item.id);
+    // Jede Staffel hat ihren eigenen AniList-Eintrag, gezeigt wird der der gewählten Staffel.
+    let season_maps: Vec<&Mapping> = row_data
+        .map(|r| match season {
+            Some(season) => season_mappings(&r.mappings, season),
+            None => r.mappings.iter().collect(),
+        })
+        .unwrap_or_default();
+    let mapping = season_maps.first().copied();
+    let unsure = season_maps.iter().any(|m| m.source == MappingSource::Guess);
     let entry = mapping.and_then(|m| app.core.entry_for(m.media_id));
     let summary = match (mapping, &entry) {
         (Some(mapping), Some(entry)) => format!(
@@ -566,10 +641,13 @@ fn anilist_summary<'a>(app: &'a App, item: &'a LibraryItem) -> Element<'a, Msg> 
             "AniList: {} · not on your list",
             ui::ellipsize(&mapping.title, 44)
         ),
+        (None, _) if season.is_some() && row_data.is_some_and(|r| !r.mappings.is_empty()) => {
+            "AniList: this season has no match".to_owned()
+        }
         (None, _) => "AniList: no match".to_owned(),
     };
     let mut actions = row![ui::muted(summary)].spacing(10).align_y(Center);
-    if row_data.is_some_and(|r| r.unsure) {
+    if unsure {
         actions = actions
             .push(ui::badge_row(
                 "? unsure, not synced".to_owned(),
@@ -597,7 +675,6 @@ pub fn detail_view(app: &App) -> Element<'_, Message> {
     let poster_key = item.has_poster.then(|| ImageKey::Poster(item.id.clone()));
     let facts = [
         item.year.map(|y| y.to_string()),
-        item.community_rating.map(|r| format!("★ {r:.1}")),
         item.status.clone(),
         item.runtime_secs
             .filter(|_| item.kind == ItemKind::Movie)
@@ -630,24 +707,41 @@ pub fn detail_view(app: &App) -> Element<'_, Message> {
         row![
             ui::picture(&app.images, poster_key, 200, 300, want),
             column![
-                text(ui::ellipsize(&item.name, 70)).size(34),
-                ui::muted(facts),
+                text(ui::ellipsize(&item.name, 70))
+                    .size(34)
+                    .font(ui::SEMIBOLD),
+                facts_line(item.community_rating, facts),
                 container(
                     text(ui::ellipsize(item.overview.as_deref().unwrap_or(""), 520)).size(15)
                 )
                 .max_width(760),
                 row![
-                    ui::primary(play_label, Msg::Play(item.clone(), next_episode)),
-                    ui::secondary(
+                    ui::icon_label(
+                        Icon::Play,
+                        play_label,
+                        Msg::Play(item.clone(), next_episode),
+                        theme::primary_pill,
+                        theme::BG,
+                    ),
+                    ui::icon_button(
+                        Icon::CheckCircle,
+                        22.0,
                         if item.played {
-                            "Mark unwatched"
+                            theme::ACCENT
                         } else {
-                            "Mark watched"
+                            theme::TEXT
                         },
-                        Msg::SetPlayed(item.id.clone(), !item.played)
+                        Some(Msg::SetPlayed(item.id.clone(), !item.played)),
+                        if item.played {
+                            "Mark as unwatched"
+                        } else {
+                            "Mark as watched"
+                        },
+                        theme::ghost_button,
                     ),
                 ]
-                .spacing(10),
+                .spacing(12)
+                .align_y(Center),
                 anilist_summary(app, item),
             ]
             .spacing(12)
@@ -664,7 +758,15 @@ pub fn detail_view(app: &App) -> Element<'_, Message> {
             .height(BACKDROP_HEIGHT)
             .style(theme::hero_fade),
         column![
-            container(ui::secondary("← Back", Msg::CloseDetail)).padding(16),
+            container(ui::icon_button(
+                Icon::ArrowBack,
+                22.0,
+                theme::TEXT,
+                Some(Msg::CloseDetail),
+                "Back (Esc)",
+                theme::ghost_button,
+            ))
+            .padding(16),
             container(header).height(Fill).align_y(Bottom),
         ]
         .height(BACKDROP_HEIGHT),

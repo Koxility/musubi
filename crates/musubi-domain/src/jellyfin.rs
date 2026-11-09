@@ -69,10 +69,7 @@ impl ShelfItem {
 impl LibraryItem {
     /// Sucht eine Provider-ID ohne Rücksicht auf Groß-/Kleinschreibung.
     pub fn provider_id(&self, names: &[&str]) -> Option<&str> {
-        self.provider_ids
-            .iter()
-            .find(|(key, _)| names.iter().any(|n| key.eq_ignore_ascii_case(n)))
-            .map(|(_, value)| value.as_str())
+        find_provider_id(&self.provider_ids, names)
     }
 }
 
@@ -81,6 +78,24 @@ pub struct Season {
     pub id: String,
     pub name: String,
     pub number: u32,
+    /// Manche Metadaten-Plugins setzen AniList- oder MAL-IDs pro Staffel.
+    #[serde(default)]
+    pub provider_ids: BTreeMap<String, String>,
+    #[serde(default)]
+    pub year: Option<i32>,
+}
+
+impl Season {
+    /// Sucht eine Provider-ID ohne Rücksicht auf Groß-/Kleinschreibung.
+    pub fn provider_id(&self, names: &[&str]) -> Option<&str> {
+        find_provider_id(&self.provider_ids, names)
+    }
+}
+
+fn find_provider_id<'a>(ids: &'a BTreeMap<String, String>, names: &[&str]) -> Option<&'a str> {
+    ids.iter()
+        .find(|(key, _)| names.iter().any(|n| key.eq_ignore_ascii_case(n)))
+        .map(|(_, value)| value.as_str())
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

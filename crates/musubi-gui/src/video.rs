@@ -13,10 +13,8 @@ use gstreamer as gst;
 use gstreamer::prelude::*;
 use gstreamer_app as gst_app;
 use iced::mouse::Interaction;
-use iced::widget::{
-    Space, button, center, column, container, mouse_area, row, slider, stack, text,
-};
-use iced::{Center, ContentFit, Element, Fill, Subscription, Task, window};
+use iced::widget::{Space, center, column, container, mouse_area, row, slider, stack, text};
+use iced::{Center, Color, ContentFit, Element, Fill, Subscription, Task, window};
 use iced_video_player::{Video, VideoPlayer};
 use musubi_core::{PlayerBackend, PlayerCommand};
 use musubi_player::{
@@ -27,6 +25,7 @@ use secrecy::{ExposeSecret, SecretString};
 use tokio::sync::{Mutex, mpsc};
 
 use crate::app::{App, Message};
+use crate::icons::Icon;
 use crate::{theme, ui};
 
 const REQUIRED_ELEMENTS: [&str; 5] = [
@@ -285,6 +284,8 @@ pub struct State {
     fullscreen: bool,
     seek_preview: Option<f64>,
     volume: f64,
+    /// Lautstärke vor dem Stummschalten.
+    unmuted_volume: f64,
 }
 
 impl Default for State {
@@ -296,6 +297,7 @@ impl Default for State {
             fullscreen: false,
             seek_preview: None,
             volume: 1.0,
+            unmuted_volume: 1.0,
         }
     }
 }
@@ -325,6 +327,7 @@ pub enum Key {
     Back,
     Forward,
     Fullscreen,
+    Mute,
 }
 
 #[derive(Debug, Clone)]
@@ -341,6 +344,7 @@ pub enum Msg {
     SeekPreview(f64),
     SeekCommit,
     Volume(f64),
+    ToggleMute,
 }
 
 fn command_stream(link: &VideoLink) -> impl iced::futures::Stream<Item = Message> + use<> {
@@ -638,6 +642,7 @@ pub fn update(app: &mut App, msg: Msg) -> Task<Message> {
                 Key::Back => apply(app, PlayerCommand::SeekRelative(-SEEK_STEP)),
                 Key::Forward => apply(app, PlayerCommand::SeekRelative(SEEK_STEP)),
                 Key::Fullscreen => update(app, Msg::ToggleFullscreen),
+                Key::Mute => update(app, Msg::ToggleMute),
             };
         }
         Msg::Key(_) => {}
@@ -655,86 +660,229 @@ pub fn update(app: &mut App, msg: Msg) -> Task<Message> {
                 return apply(app, PlayerCommand::SeekAbsolute(position));
             }
         }
-        Msg::Volume(volume) => {
-            app.video.show_controls();
-            app.video.volume = volume;
-            if let Some(video) = app.video.session.as_mut().and_then(|s| s.video.as_mut()) {
-                video.set_volume(volume);
+        Msg::Volume(volume) => set_volume(app, volume),
+        Msg::ToggleMute => {
+            let state = &mut app.video;
+            if state.volume > 0.0 {
+                state.unmuted_volume = state.volume;
+                set_volume(app, 0.0);
+            } else {
+                let restored = app.video.unmuted_volume.max(0.05);
+                set_volume(app, restored);
             }
         }
     }
     Task::none()
 }
 
-fn control<'a>(label: &'a str, message: Msg) -> Element<'a, Msg> {
-    button(text(label).size(15))
-        .padding([8, 12])
-        .style(theme::secondary)
-        .on_press(message)
-        .into()
+fn set_volume(app: &mut App, volume: f64) {
+    app.video.show_controls();
+    app.video.volume = volume;
+    if let Some(video) = app.video.session.as_mut().and_then(|s| s.video.as_mut()) {
+        video.set_volume(volume);
+    }
+}
+
+/// Icon-Button über dem Video. Ohne Nachricht ist er abgeschwächt.
+fn control<'a>(icon: Icon, size: f32, message: Option<Msg>, label: &'a str) -> Element<'a, Msg> {
+    ui::icon_button(
+        icon,
+        size,
+        theme::ON_VIDEO,
+        message,
+        label,
+        theme::icon_button,
+    )
+}
+
+/// Wie `control`, aber farbig hervorgehoben, solange die Funktion an ist.
+fn toggle<'a>(icon: Icon, on: bool, message: Msg, label: &'a str) -> Element<'a, Msg> {
+    let color = if on { theme::ACCENT } else { theme::ON_VIDEO };
+    ui::icon_button(icon, 22.0, color, Some(message), label, theme::icon_button)
 }
 
 fn top_bar<'a>(title: &'a str) -> Element<'a, Msg> {
+    let (series, episode) = ui::split_title(title);
+    let mut heading = column![
+        text(ui::ellipsize(series, 90))
+            .size(19)
+            .font(ui::SEMIBOLD)
+            .color(theme::ON_VIDEO)
+    ]
+    .spacing(2);
+    if let Some(episode) = episode {
+        heading = heading.push(
+            text(ui::ellipsize(&episode, 110))
+                .size(14)
+                .color(theme::ON_VIDEO_MUTED),
+        );
+    }
     container(
         row![
-            control("← Back", Msg::Stop),
-            text(ui::ellipsize(title, 110)).size(17),
+            control(Icon::ArrowBack, 24.0, Some(Msg::Stop), "Back (Esc)"),
+            heading
         ]
         .spacing(14)
         .align_y(Center),
     )
-    .padding([12, 16])
+    .padding(iced::padding::top(18).left(20).right(28).bottom(56))
     .width(Fill)
-    .style(theme::dim)
+    .style(theme::scrim_top)
     .into()
 }
 
-fn bottom_bar<'a>(state: &'a State, video: &'a Video) -> Element<'a, Msg> {
+/// Rückspulen, Wiedergabe und Vorspulen in der Bildmitte, wie bei Streaming-Diensten.
+fn center_controls<'a>(video: &'a Video) -> Element<'a, Msg> {
+    let command = Msg::Control;
+    let play = if video.paused() {
+        (Icon::Play, "Play (Space)")
+    } else {
+        (Icon::Pause, "Pause (Space)")
+    };
+    center(
+        row![
+            control(
+                Icon::Replay10,
+                34.0,
+                Some(command(PlayerCommand::SeekRelative(-SEEK_STEP))),
+                "Back 10 s (Left)",
+            ),
+            ui::icon_button(
+                play.0,
+                40.0,
+                theme::ON_VIDEO,
+                Some(command(PlayerCommand::TogglePause)),
+                play.1,
+                theme::play_button,
+            ),
+            control(
+                Icon::Forward10,
+                34.0,
+                Some(command(PlayerCommand::SeekRelative(SEEK_STEP))),
+                "Forward 10 s (Right)",
+            ),
+        ]
+        .spacing(36)
+        .align_y(Center),
+    )
+    .into()
+}
+
+fn volume_icon(volume: f64) -> Icon {
+    match volume {
+        v if v <= 0.0 => Icon::VolumeOff,
+        v if v < 0.5 => Icon::VolumeLow,
+        _ => Icon::Volume,
+    }
+}
+
+fn bottom_bar<'a>(state: &'a State, session: &'a Session, video: &'a Video) -> Element<'a, Msg> {
     let duration = video.duration().as_secs_f64().max(1.0);
     let position = state
         .seek_preview
         .unwrap_or_else(|| video.position().as_secs_f64())
         .min(duration);
-    let time = format!(
-        "{} / {}",
-        ui::format_time(position),
-        ui::format_time(duration)
-    );
     let command = Msg::Control;
-    container(
-        column![
-            slider(0.0..=duration, position, Msg::SeekPreview).on_release(Msg::SeekCommit),
-            row![
-                control("⏮", command(PlayerCommand::Previous)),
-                control("-10", command(PlayerCommand::SeekRelative(-SEEK_STEP))),
-                control(
-                    if video.paused() { "▶" } else { "⏸" },
-                    command(PlayerCommand::TogglePause)
-                ),
-                control("+10", command(PlayerCommand::SeekRelative(SEEK_STEP))),
-                control("⏭", command(PlayerCommand::Next)),
-                text(time).size(14),
-                ui::spacer(),
-                control("Subs", command(PlayerCommand::CycleSubtitle)),
-                control("Audio", command(PlayerCommand::CycleAudio)),
-                container(slider(0.0..=1.0, state.volume, Msg::Volume).step(0.01)).width(110),
-                control(
-                    if state.fullscreen {
-                        "Window"
-                    } else {
-                        "Fullscreen"
-                    },
-                    Msg::ToggleFullscreen
-                ),
-            ]
-            .spacing(8)
-            .align_y(Center),
+    let playlist = &session.playlist;
+    let previous = playlist
+        .previous_index()
+        .map(|_| command(PlayerCommand::Previous));
+    let next = playlist.next_index().map(|_| command(PlayerCommand::Next));
+    let play = if video.paused() {
+        (Icon::Play, "Play (Space)")
+    } else {
+        (Icon::Pause, "Pause (Space)")
+    };
+    let time = |seconds: f64| text(ui::format_time(seconds)).size(13);
+    let seek = row![
+        time(position).color(theme::ON_VIDEO),
+        slider(0.0..=duration, position, Msg::SeekPreview)
+            .on_release(Msg::SeekCommit)
+            .height(18)
+            .style(theme::seek_slider),
+        time(duration).color(theme::ON_VIDEO_MUTED),
+    ]
+    .spacing(14)
+    .align_y(Center);
+    let left = row![
+        control(
+            play.0,
+            26.0,
+            Some(command(PlayerCommand::TogglePause)),
+            play.1
+        ),
+        control(Icon::SkipPrevious, 22.0, previous, "Previous episode"),
+        control(Icon::SkipNext, 22.0, next, "Next episode"),
+        row![
+            control(
+                volume_icon(state.volume),
+                22.0,
+                Some(Msg::ToggleMute),
+                "Mute (M)"
+            ),
+            container(
+                slider(0.0..=1.0, state.volume, Msg::Volume)
+                    .step(0.01)
+                    .height(18)
+                    .style(theme::volume_slider)
+            )
+            .width(96),
         ]
-        .spacing(8),
+        .spacing(2)
+        .align_y(Center),
+    ]
+    .spacing(6)
+    .align_y(Center);
+    let fullscreen = if state.fullscreen {
+        (Icon::FullscreenExit, "Exit full screen (F)")
+    } else {
+        (Icon::Fullscreen, "Full screen (F)")
+    };
+    let right = row![
+        toggle(
+            Icon::Subtitles,
+            session.subtitles_on,
+            command(PlayerCommand::CycleSubtitle),
+            "Subtitles (Ctrl+J)"
+        ),
+        control(
+            Icon::Audio,
+            22.0,
+            Some(command(PlayerCommand::CycleAudio)),
+            "Audio track (Ctrl+K)"
+        ),
+        control(
+            fullscreen.0,
+            22.0,
+            Some(Msg::ToggleFullscreen),
+            fullscreen.1
+        ),
+    ]
+    .spacing(6)
+    .align_y(Center);
+    container(column![seek, row![left, ui::spacer(), right].align_y(Center)].spacing(10))
+        .padding(iced::padding::top(64).left(24).right(24).bottom(18))
+        .width(Fill)
+        .style(theme::scrim_bottom)
+        .into()
+}
+
+fn loading<'a>() -> Element<'a, Msg> {
+    center(
+        column![
+            ui::icon(
+                Icon::Play,
+                34.0,
+                Color {
+                    a: 0.35,
+                    ..theme::ON_VIDEO
+                }
+            ),
+            text("Loading").size(14).color(theme::ON_VIDEO_MUTED),
+        ]
+        .spacing(12)
+        .align_x(Center),
     )
-    .padding([12, 16])
-    .width(Fill)
-    .style(theme::dim)
     .into()
 }
 
@@ -750,7 +898,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
             .content_fit(ContentFit::Contain)
             .on_end_of_stream(Msg::EndOfStream)
             .into(),
-        None => center(text("Loading…").size(18).color(theme::MUTED)).into(),
+        None => loading(),
     };
     let visible = state.controls_visible();
     let surface = mouse_area(
@@ -769,13 +917,13 @@ pub fn view(app: &App) -> Element<'_, Message> {
     });
     let mut layers = stack![surface].width(Fill).height(Fill);
     if visible {
-        let bottom: Element<'_, Msg> = match &session.video {
-            Some(video) => bottom_bar(state, video),
-            None => Space::new().into(),
+        let (middle, bottom): (Element<'_, Msg>, Element<'_, Msg>) = match &session.video {
+            Some(video) => (center_controls(video), bottom_bar(state, session, video)),
+            None => (Space::new().height(Fill).into(), Space::new().into()),
         };
         layers = layers.push(column![
             top_bar(session.title()),
-            Space::new().height(Fill),
+            container(middle).height(Fill),
             bottom
         ]);
     }

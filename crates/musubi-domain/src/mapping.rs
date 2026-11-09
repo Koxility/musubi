@@ -69,12 +69,33 @@ pub fn is_unsure(mappings: &[Mapping]) -> bool {
     mappings.iter().any(|m| m.source == MappingSource::Guess)
 }
 
-/// Findet Werk und AniList-Episode zu einer Jellyfin-Episode.
-pub fn resolve_episode(mappings: &[Mapping], season: u32, episode: u32) -> Option<(i64, u32)> {
+/// Die Zuordnung, die eine Jellyfin-Episode abdeckt.
+pub fn mapping_at(mappings: &[Mapping], season: u32, episode: u32) -> Option<&Mapping> {
     mappings
         .iter()
         .filter(|m| m.contains(season, episode))
-        .find_map(|m| m.anilist_episode(episode).map(|ep| (m.media_id, ep)))
+        .find(|m| m.anilist_episode(episode).is_some())
+}
+
+/// Findet Werk und AniList-Episode zu einer Jellyfin-Episode.
+pub fn resolve_episode(mappings: &[Mapping], season: u32, episode: u32) -> Option<(i64, u32)> {
+    mapping_at(mappings, season, episode)
+        .and_then(|m| m.anilist_episode(episode).map(|ep| (m.media_id, ep)))
+}
+
+/// Ob ein Werk nur über einen unsicheren Treffer zugeordnet ist. Andere Staffeln desselben
+/// Titels spielen keine Rolle.
+pub fn is_media_unsure(mappings: &[Mapping], media_id: i64) -> bool {
+    mappings
+        .iter()
+        .any(|m| m.media_id == media_id && m.source == MappingSource::Guess)
+}
+
+/// Die Zuordnungen einer Staffel, nach erster Episode sortiert.
+pub fn season_mappings(mappings: &[Mapping], season: u32) -> Vec<&Mapping> {
+    let mut found: Vec<&Mapping> = mappings.iter().filter(|m| m.season == season).collect();
+    found.sort_by_key(|m| m.ep_start);
+    found
 }
 
 #[cfg(test)]
@@ -123,6 +144,16 @@ mod tests {
         let maps = [mapping(2, 25, None, 30, -24)];
         assert_eq!(resolve_episode(&maps, 2, 26), Some((30, 2)));
         assert_eq!(resolve_episode(&maps, 1, 26), None);
+    }
+
+    #[test]
+    fn unsure_is_judged_per_work() {
+        let mut maps = [mapping(1, 1, Some(12), 10, 0), mapping(2, 1, None, 20, 0)];
+        maps[1].source = MappingSource::Guess;
+        assert!(!is_media_unsure(&maps, 10));
+        assert!(is_media_unsure(&maps, 20));
+        assert_eq!(mapping_at(&maps, 2, 3).map(|m| m.media_id), Some(20));
+        assert_eq!(season_mappings(&maps, 1).len(), 1);
     }
 
     #[test]

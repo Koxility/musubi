@@ -663,3 +663,223 @@ async fn removing_a_mapping_keeps_the_title_from_being_matched_again() {
     assert!(core.mappings_for("m1").await.unwrap().is_empty());
     assert_eq!(core.reviews().await.unwrap()[0].jellyfin_id, "m1");
 }
+
+fn anime(id: i64, title: &str, format: &str, episodes: u32, year: i32) -> Value {
+    json!({
+        "id": id, "type": "ANIME", "format": format, "episodes": episodes,
+        "title": {"romaji": title}, "seasonYear": year, "genres": [], "status": "FINISHED"
+    })
+}
+
+/// AniList mit Staffel 1 (1), einem Film dazwischen (2) und Staffel 2 (3).
+async fn mock_franchise() -> MockServer {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(move |request: &Request| {
+            let body: Value = serde_json::from_slice(&request.body).unwrap();
+            let query = body["query"].as_str().unwrap();
+            let id = body["variables"]["id"].as_i64().unwrap_or(0);
+            let by_id = |id: i64| match id {
+                1 => anime(1, "Show", "TV", 12, 2020),
+                2 => anime(2, "Show the Movie", "MOVIE", 1, 2021),
+                3 => anime(3, "Show 2nd Season", "TV", 12, 2022),
+                other => anime(other, "Something Else", "TV", 12, 2010),
+            };
+            let edge =
+                |relation: &str, node: Value| json!({"relationType": relation, "node": node});
+            let data = if query.contains("Viewer") {
+                json!({"Viewer": {"id": 7, "name": "eden",
+                    "mediaListOptions": {"scoreFormat": "POINT_100"}}})
+            } else if query.contains("MediaListCollection") {
+                json!({"MediaListCollection": {"hasNextChunk": false, "lists": []}})
+            } else if query.contains("Page") {
+                json!({"Page": {"media": [by_id(1), by_id(3)]}})
+            } else if query.contains("relations") {
+                let edges = match id {
+                    1 => vec![edge("SEQUEL", by_id(2))],
+                    2 => vec![edge("PREQUEL", by_id(1)), edge("SEQUEL", by_id(3))],
+                    _ => vec![],
+                };
+                let mut media = by_id(id);
+                media["relations"] = json!({"edges": edges});
+                json!({"Media": media})
+            } else {
+                json!({"Media": by_id(id)})
+            };
+            ResponseTemplate::new(200)
+                .insert_header("X-RateLimit-Limit", "90")
+                .set_body_json(json!({"data": data}))
+        })
+        .mount(&server)
+        .await;
+    server
+}
+
+/// Jellyfin mit einer Serie aus zwei Staffeln zu je zwölf Folgen.
+async fn mock_two_seasons() -> MockServer {
+    let server = MockServer::start().await;
+    let ok = |body: Value| ResponseTemplate::new(200).set_body_json(body);
+    Mock::given(method("GET"))
+        .and(path("/System/Info/Public"))
+        .respond_with(ok(json!({})))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/Users/AuthenticateByName"))
+        .respond_with(ok(
+            json!({"AccessToken": "t", "User": {"Id": "u1", "Name": "eden"}}),
+        ))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/Items"))
+        .respond_with(ok(json!({"TotalRecordCount": 1, "Items": [
+            {"Id": "s1", "Name": "Show", "Type": "Series", "ProductionYear": 2020}
+        ]})))
+        .mount(&server)
+        .await;
+    let episodes: Vec<Value> = (1..=2)
+        .flat_map(|season| {
+            (1..=12).map(move |number| {
+                json!({"Id": format!("e{season}x{number}"), "Name": "Ep", "SeriesName": "Show",
+                    "ParentIndexNumber": season, "IndexNumber": number})
+            })
+        })
+        .collect();
+    Mock::given(method("GET"))
+        .and(path("/Shows/s1/Episodes"))
+        .respond_with(ok(json!({ "Items": episodes })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/Shows/s1/Seasons"))
+        .respond_with(ok(json!({"Items": [
+            {"Id": "x1", "Name": "Season 1", "IndexNumber": 1},
+            {"Id": "x2", "Name": "Season 2", "IndexNumber": 2}
+        ]})))
+        .mount(&server)
+        .await;
+    server
+}
+
+fn season_media(mappings: &[Mapping], season: u32) -> Vec<(i64, MappingSource)> {
+    mappings
+        .iter()
+        .filter(|m| m.season == season)
+        .map(|m| (m.media_id, m.source))
+        .collect()
+}
+
+async fn franchise_core(dir: &Path) -> (Core, MockServer, MockServer) {
+    let jellyfin = mock_two_seasons().await;
+    let anilist = mock_franchise().await;
+    let core = core(dir, &anilist).await;
+    core.login_jellyfin(&jellyfin.uri(), "eden", &SecretString::from("pw"))
+        .await
+        .unwrap();
+    core.login_anilist_pin("token").await.unwrap();
+    (core, jellyfin, anilist)
+}
+
+#[tokio::test]
+async fn every_season_gets_its_own_entry_even_across_a_movie() {
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _jellyfin, _anilist) = franchise_core(dir.path()).await;
+
+    let outcome = core.auto_match(&series()).await.unwrap();
+
+    assert_eq!(outcome, MatchOutcome::Mapped);
+    let mappings = core.mappings_for("s1").await.unwrap();
+    assert_eq!(season_media(&mappings, 1), vec![(1, MappingSource::Title)]);
+    assert_eq!(season_media(&mappings, 2), vec![(3, MappingSource::Title)]);
+    let s2 = mappings.iter().find(|m| m.season == 2).unwrap();
+    assert_eq!((s2.ep_start, s2.offset), (1, 0));
+}
+
+#[tokio::test]
+async fn one_season_can_be_changed_without_touching_the_other() {
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _jellyfin, _anilist) = franchise_core(dir.path()).await;
+    core.auto_match(&series()).await.unwrap();
+
+    core.map_season_manually(&series(), Some(2), 77, false)
+        .await
+        .unwrap();
+    core.unmap_season("s1", 1).await.unwrap();
+
+    let mappings = core.mappings_for("s1").await.unwrap();
+    assert!(season_media(&mappings, 1).is_empty());
+    assert_eq!(
+        season_media(&mappings, 2),
+        vec![(77, MappingSource::Manual)]
+    );
+}
+
+#[tokio::test]
+async fn old_mappings_are_replanned_once_and_manual_seasons_stay() {
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _jellyfin, _anilist) = franchise_core(dir.path()).await;
+    // Stand einer älteren Version: Staffel 1 sicher, Staffel 2 landete auf dem Film.
+    let old = |season: u32, media_id: i64, source: MappingSource| Mapping {
+        season,
+        media_id,
+        source,
+        confidence: 0.9,
+        ..mapping()
+    };
+    core.set_mappings(
+        "s1",
+        vec![
+            old(1, 1, MappingSource::Title),
+            old(2, 2, MappingSource::Guess),
+        ],
+    )
+    .await
+    .unwrap();
+
+    core.match_all(false).await.unwrap();
+
+    let mappings = core.mappings_for("s1").await.unwrap();
+    assert_eq!(season_media(&mappings, 1), vec![(1, MappingSource::Title)]);
+    assert_eq!(season_media(&mappings, 2), vec![(3, MappingSource::Title)]);
+
+    // Ein zweiter Lauf plant nicht noch einmal neu.
+    core.set_mappings(
+        "s1",
+        vec![
+            old(1, 50, MappingSource::Manual),
+            old(2, 2, MappingSource::Guess),
+        ],
+    )
+    .await
+    .unwrap();
+    core.match_all(false).await.unwrap();
+    let mappings = core.mappings_for("s1").await.unwrap();
+    assert_eq!(season_media(&mappings, 2), vec![(2, MappingSource::Guess)]);
+}
+
+#[tokio::test]
+async fn a_manual_season_survives_the_upgrade_and_the_next_season_searches_itself() {
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _jellyfin, _anilist) = franchise_core(dir.path()).await;
+    let manual = Mapping {
+        media_id: 50,
+        ..mapping()
+    };
+    let wrong = Mapping {
+        season: 2,
+        media_id: 2,
+        source: MappingSource::Title,
+        ..mapping()
+    };
+    core.set_mappings("s1", vec![manual, wrong]).await.unwrap();
+
+    core.match_all(false).await.unwrap();
+
+    let mappings = core.mappings_for("s1").await.unwrap();
+    assert_eq!(
+        season_media(&mappings, 1),
+        vec![(50, MappingSource::Manual)]
+    );
+    assert_eq!(season_media(&mappings, 2), vec![(3, MappingSource::Title)]);
+}

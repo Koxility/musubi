@@ -28,3 +28,4 @@ async-trait.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+usvg.workspace = true

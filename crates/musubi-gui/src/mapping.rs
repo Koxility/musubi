@@ -1,7 +1,9 @@
 //! Automatische Zuordnungen ansehen und nachträglich ändern.
 
+use std::fmt;
+
 use iced::widget::{
-    Column, column, container, progress_bar, row, scrollable, text, text_input, toggler,
+    Column, column, container, pick_list, progress_bar, row, scrollable, text, text_input, toggler,
 };
 use iced::{Center, Element, Fill, Length, Task};
 use musubi_core::domain::{LibraryItem, Mapping, MappingSource, Media, MediaKind};
@@ -67,9 +69,25 @@ impl MappingForm {
     }
 }
 
+/// Welche Staffeln der Ändern-Dialog betrifft.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Scope(pub Option<u32>);
+
+impl fmt::Display for Scope {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            None => f.write_str("All seasons"),
+            Some(0) => f.write_str("Specials"),
+            Some(n) => write!(f, "Season {n}"),
+        }
+    }
+}
+
 pub enum Modal {
     Change {
         item: Box<LibraryItem>,
+        scope: Scope,
+        seasons: Vec<u32>,
         query: String,
         results: Vec<Media>,
         searching: bool,
@@ -119,7 +137,8 @@ pub enum FormEdit {
 pub enum Msg {
     Loaded(Result<(Vec<ReviewItem>, Vec<Mapping>), String>),
     MatchAgain,
-    OpenChange(Box<LibraryItem>),
+    OpenChange(Box<LibraryItem>, Option<u32>),
+    Scope(Scope),
     Query(String),
     Search,
     Results(Result<Vec<Media>, String>),
@@ -127,11 +146,12 @@ pub enum Msg {
     MapFollow(bool),
     UseMedia(i64),
     SubmitId,
-    Confirm(String),
+    Confirm(String, Option<u32>),
     OpenEdit(Box<Mapping>),
     Edit(FormEdit),
     SubmitEdit,
     Unmap(String),
+    UnmapSeason(String, u32),
     Close,
 }
 
@@ -152,10 +172,41 @@ pub fn auto_match(app: &App) -> Task<Message> {
     ui::perform(async move { core.match_all(false).await }, Message::Notify)
 }
 
-pub fn open_change_dialog(app: &mut App, item: LibraryItem) {
+/// Suchtext für eine Staffel. Spätere Staffeln nennen ihre Nummer, sonst findet AniList zuerst
+/// den Anfang der Serie.
+fn query_for(item: &LibraryItem, season: Option<u32>) -> String {
+    match season {
+        Some(n) if n > 1 => format!("{} Season {n}", item.name),
+        _ => item.name.clone(),
+    }
+}
+
+/// Staffeln, die der Dialog anbietet: bekannte Zuordnungen und die geöffnete Detailseite.
+fn known_seasons(app: &App, item: &LibraryItem, season: Option<u32>) -> Vec<u32> {
+    let mut seasons: Vec<u32> = app
+        .mapping
+        .mappings
+        .iter()
+        .filter(|m| m.jellyfin_id == item.id)
+        .map(|m| m.season)
+        .chain(library::detail_seasons(app, &item.id))
+        .chain(season)
+        .collect();
+    seasons.sort_by_key(|n| (*n == 0, *n));
+    seasons.dedup();
+    seasons
+}
+
+/// Öffnet den Ändern-Dialog. `season` wählt eine einzelne Staffel vor, `None` alle.
+pub fn open_change_dialog(app: &mut App, item: LibraryItem, season: Option<u32>) {
+    let seasons = known_seasons(app, &item, season);
+    // Ein Film oder eine Serie mit nur einer Staffel braucht keine Auswahl.
+    let season = season.filter(|_| seasons.len() > 1 || season.is_some_and(|n| n != 1));
     app.mapping.modal = Some(Modal::Change {
-        query: item.name.clone(),
+        query: query_for(&item, season),
         item: Box::new(item),
+        scope: Scope(season),
+        seasons,
         results: vec![],
         searching: false,
         id: String::new(),
@@ -164,29 +215,34 @@ pub fn open_change_dialog(app: &mut App, item: LibraryItem) {
     });
 }
 
-/// Macht aus einem unsicheren Treffer eine feste Zuordnung.
-pub fn confirm(app: &App, id: String) -> Task<Message> {
+/// Macht aus unsicheren Treffern feste Zuordnungen, mit `season` nur für diese Staffel.
+pub fn confirm(app: &App, id: String, season: Option<u32>) -> Task<Message> {
     let core = app.core.clone();
     ui::perform(
-        async move { core.confirm_mapping(&id).await },
-        Message::Notify,
-    )
-}
-
-fn map_to(app: &App, item: LibraryItem, media: i64, follow: bool) -> Task<Message> {
-    let core = app.core.clone();
-    ui::perform(
-        async move { core.map_manually(&item, media, follow).await },
+        async move { core.confirm_season(&id, season).await },
         Message::Notify,
     )
 }
 
 /// Schließt den Ändern-Dialog und ordnet das gewählte Werk zu.
 fn use_media(app: &mut App, media: i64) -> Task<Message> {
-    let Some(Modal::Change { item, follow, .. }) = app.mapping.modal.take() else {
+    let Some(Modal::Change {
+        item,
+        follow,
+        scope,
+        ..
+    }) = app.mapping.modal.take()
+    else {
         return Task::none();
     };
-    map_to(app, *item, media, follow)
+    let core = app.core.clone();
+    ui::perform(
+        async move {
+            core.map_season_manually(&item, scope.0, media, follow)
+                .await
+        },
+        Message::Notify,
+    )
 }
 
 pub fn update(app: &mut App, msg: Msg) -> Task<Message> {
@@ -201,7 +257,19 @@ pub fn update(app: &mut App, msg: Msg) -> Task<Message> {
         Msg::MatchAgain => {
             return ui::perform(async move { core.match_all(true).await }, Message::Notify);
         }
-        Msg::OpenChange(item) => open_change_dialog(app, *item),
+        Msg::OpenChange(item, season) => open_change_dialog(app, *item, season),
+        Msg::Scope(chosen) => {
+            if let Some(Modal::Change {
+                scope, query, item, ..
+            }) = &mut app.mapping.modal
+            {
+                // Nur einen unveränderten Vorschlag anpassen, eigene Eingaben bleiben.
+                if *query == query_for(item, scope.0) {
+                    *query = query_for(item, chosen.0);
+                }
+                *scope = chosen;
+            }
+        }
         Msg::Query(value) => {
             if let Some(Modal::Change { query, .. }) = &mut app.mapping.modal {
                 *query = value;
@@ -254,7 +322,7 @@ pub fn update(app: &mut App, msg: Msg) -> Task<Message> {
                 }
             }
         }
-        Msg::Confirm(id) => return confirm(app, id),
+        Msg::Confirm(id, season) => return confirm(app, id, season),
         Msg::OpenEdit(mapping) => {
             app.mapping.modal = Some(Modal::Edit {
                 form: MappingForm::new(&mapping),
@@ -308,6 +376,13 @@ pub fn update(app: &mut App, msg: Msg) -> Task<Message> {
             app.mapping.modal = None;
             return ui::perform(async move { core.unmap(&id).await }, Message::Notify);
         }
+        Msg::UnmapSeason(id, season) => {
+            app.mapping.modal = None;
+            return ui::perform(
+                async move { core.unmap_season(&id, season).await },
+                Message::Notify,
+            );
+        }
         Msg::Close => app.mapping.modal = None,
     }
     Task::none()
@@ -321,44 +396,100 @@ fn item_for<'a>(app: &'a App, id: &str) -> Option<&'a LibraryItem> {
         .map(|r| &r.item)
 }
 
-fn mapped_row<'a>(app: &'a App, mapping: &'a Mapping) -> Element<'a, Msg> {
-    let item = item_for(app, &mapping.jellyfin_id);
-    let name = item.map_or(mapping.jellyfin_id.as_str(), |i| i.name.as_str());
-    let details = format!(
-        "S{} E{}-{} ({:+}) → {}",
-        mapping.season,
-        mapping.ep_start,
-        mapping.ep_end.map_or("…".to_owned(), |e| e.to_string()),
-        mapping.offset,
-        ui::ellipsize(&mapping.title, 60),
+fn season_label(season: u32) -> String {
+    Scope(Some(season)).to_string()
+}
+
+/// Eine Zeile pro Staffel: Bereich, Werk und Aktionen nur für diese Staffel.
+fn season_line<'a>(
+    item: Option<&'a LibraryItem>,
+    season: u32,
+    mappings: &[&'a Mapping],
+) -> Element<'a, Msg> {
+    let parts: Vec<String> = mappings
+        .iter()
+        .map(|m| {
+            format!(
+                "E{}–{} → {}{}",
+                m.ep_start,
+                m.ep_end.map_or("…".to_owned(), |e| e.to_string()),
+                ui::ellipsize(&m.title, 54),
+                if m.offset == 0 {
+                    String::new()
+                } else {
+                    format!(" ({:+})", m.offset)
+                },
+            )
+        })
+        .collect();
+    let unsure = mappings.iter().any(|m| m.source == MappingSource::Guess);
+    let mut heading = row![text(season_label(season)).size(14).width(90)]
+        .spacing(8)
+        .align_y(Center);
+    heading = heading.push(
+        column(parts.into_iter().map(ui::muted))
+            .spacing(2)
+            .width(Fill),
     );
-    let unsure = mapping.source == MappingSource::Guess;
-    let mut heading = row![text(ui::ellipsize(name, 64)).size(15)]
-        .spacing(8)
-        .align_y(Center);
     if unsure {
-        heading = heading.push(ui::badge_row("? unsure".to_owned(), theme::ORANGE));
+        heading = heading.push(ui::badge_row("unsure".to_owned(), theme::ORANGE));
     }
-    let mut line = row![column![heading, ui::muted(details)].spacing(2).width(Fill)]
-        .spacing(8)
-        .align_y(Center);
+    let id = mappings
+        .first()
+        .map(|m| m.jellyfin_id.clone())
+        .unwrap_or_default();
     if unsure {
-        line = line.push(ui::primary(
+        heading = heading.push(ui::primary(
             "Confirm",
-            Msg::Confirm(mapping.jellyfin_id.clone()),
+            Msg::Confirm(id.clone(), Some(season)),
         ));
     }
-    line = line.push(match item {
-        Some(item) => ui::secondary("Change…", Msg::OpenChange(Box::new(item.clone()))),
-        None => ui::secondary("Edit…", Msg::OpenEdit(Box::new(mapping.clone()))),
+    heading = heading.push(match (item, mappings.first()) {
+        (Some(item), _) => ui::secondary(
+            "Change…",
+            Msg::OpenChange(Box::new(item.clone()), Some(season)),
+        ),
+        (None, Some(first)) => ui::secondary("Edit…", Msg::OpenEdit(Box::new((*first).clone()))),
+        (None, None) => ui::muted(""),
     });
-    container(line).padding(6).into()
+    heading
+        .push(ui::secondary("Remove", Msg::UnmapSeason(id, season)))
+        .into()
+}
+
+/// Karte eines Titels mit einer Zeile je zugeordneter Staffel.
+fn mapped_title<'a>(app: &'a App, id: &'a str, mappings: Vec<&'a Mapping>) -> Element<'a, Msg> {
+    let item = item_for(app, id);
+    let name = item.map_or(id, |i| i.name.as_str());
+    let mut seasons: Vec<u32> = mappings.iter().map(|m| m.season).collect();
+    seasons.sort_by_key(|n| (*n == 0, *n));
+    seasons.dedup();
+    let lines = seasons.into_iter().map(|season| {
+        let of_season: Vec<&Mapping> = mappings
+            .iter()
+            .copied()
+            .filter(|m| m.season == season)
+            .collect();
+        season_line(item, season, &of_season)
+    });
+    let mut heading = row![text(ui::ellipsize(name, 64)).size(16).width(Fill)]
+        .spacing(8)
+        .align_y(Center);
+    if let Some(item) = item {
+        heading = heading.push(ui::secondary(
+            "All seasons…",
+            Msg::OpenChange(Box::new(item.clone()), None),
+        ));
+    }
+    container(column![heading, column(lines).spacing(6)].spacing(8))
+        .padding(6)
+        .into()
 }
 
 fn unmatched_row(item: &LibraryItem) -> Element<'_, Msg> {
     row![
         text(ui::ellipsize(&item.name, 80)).size(15).width(Fill),
-        ui::secondary("Choose…", Msg::OpenChange(Box::new(item.clone()))),
+        ui::secondary("Choose…", Msg::OpenChange(Box::new(item.clone()), None)),
     ]
     .spacing(8)
     .align_y(Center)
@@ -402,9 +533,19 @@ pub fn view(app: &App) -> Element<'_, Message> {
             .push(text(format!("Without a match ({})", unmatched.len())).size(16))
             .push(ui::card(column(unmatched).spacing(8)));
     }
-    let mut ordered: Vec<&Mapping> = state.mappings.iter().collect();
-    ordered.sort_by_key(|m| m.source != MappingSource::Guess);
-    let mapped: Vec<Element<'_, Msg>> = ordered.into_iter().map(|m| mapped_row(app, m)).collect();
+    // Titel mit unsicheren Staffeln zuerst, sonst in der Reihenfolge der Datenbank.
+    let mut titles: Vec<(&str, Vec<&Mapping>)> = Vec::new();
+    for mapping in &state.mappings {
+        match titles.iter_mut().find(|(id, _)| *id == mapping.jellyfin_id) {
+            Some((_, list)) => list.push(mapping),
+            None => titles.push((&mapping.jellyfin_id, vec![mapping])),
+        }
+    }
+    titles.sort_by_key(|(_, list)| !list.iter().any(|m| m.source == MappingSource::Guess));
+    let mapped: Vec<Element<'_, Msg>> = titles
+        .into_iter()
+        .map(|(id, list)| mapped_title(app, id, list))
+        .collect();
     body = body
         .push(text(format!("Matched titles ({})", mapped.len())).size(16))
         .push(ui::card(column(mapped).spacing(4)));
@@ -446,6 +587,8 @@ fn result_line<'a>(media: &Media) -> Element<'a, Msg> {
 
 struct ChangeView<'a> {
     item: &'a LibraryItem,
+    scope: Scope,
+    seasons: &'a [u32],
     query: &'a str,
     results: &'a [Media],
     searching: bool,
@@ -460,15 +603,37 @@ fn change_body<'a>(app: &'a App, view: ChangeView<'a>) -> Column<'a, Msg> {
         .mappings
         .iter()
         .filter(|m| m.jellyfin_id == view.item.id)
+        .filter(|m| view.scope.0.is_none_or(|s| m.season == s))
         .collect();
-    let summary = current.first().map_or_else(
-        || "Not matched yet.".to_owned(),
-        |m| format!("Currently: {}", ui::ellipsize(&m.title, 60)),
-    );
-    let mut body = column![ui::muted(summary)].spacing(12);
+    let mut titles: Vec<&str> = current.iter().map(|m| m.title.as_str()).collect();
+    titles.dedup();
+    let summary = if titles.is_empty() {
+        "Not matched yet.".to_owned()
+    } else {
+        format!("Currently: {}", ui::ellipsize(&titles.join(", "), 80))
+    };
+    let mut body = column![].spacing(12);
+    if view.seasons.len() > 1 || view.scope.0.is_some() {
+        let mut choices = vec![Scope(None)];
+        choices.extend(view.seasons.iter().map(|s| Scope(Some(*s))));
+        body = body.push(
+            row![
+                text("Apply to").size(14).color(theme::MUTED),
+                pick_list(choices, Some(view.scope), Msg::Scope)
+                    .text_size(14)
+                    .padding([6, 10]),
+            ]
+            .spacing(10)
+            .align_y(Center),
+        );
+    }
+    body = body.push(ui::muted(summary));
+    // Die gespeicherten Vorschläge stammen aus der Suche nach dem Serientitel.
+    let fits_suggestions = view.scope.0.is_none_or(|s| s <= 1);
     let suggestions: Vec<Element<'a, Msg>> = state
         .reviews
         .iter()
+        .filter(|_| fits_suggestions)
         .find(|r| r.jellyfin_id == view.item.id)
         .map(|r| r.candidates.iter().map(candidate_line).collect())
         .unwrap_or_default();
@@ -509,7 +674,11 @@ fn change_body<'a>(app: &'a App, view: ChangeView<'a>) -> Column<'a, Msg> {
         )
         .push(
             toggler(view.follow)
-                .label("Assign sequels to later seasons")
+                .label(if view.scope.0.is_some() {
+                    "Split the season over several AniList entries"
+                } else {
+                    "Assign sequels to later seasons"
+                })
                 .text_size(14)
                 .on_toggle(Msg::MapFollow),
         );
@@ -518,8 +687,12 @@ fn change_body<'a>(app: &'a App, view: ChangeView<'a>) -> Column<'a, Msg> {
     }
     let mut actions = row![].spacing(8);
     if let Some(first) = current.first() {
+        let remove = match view.scope.0 {
+            Some(season) => Msg::UnmapSeason(view.item.id.clone(), season),
+            None => Msg::Unmap(view.item.id.clone()),
+        };
         actions = actions
-            .push(ui::danger("Remove match", Msg::Unmap(view.item.id.clone())))
+            .push(ui::danger("Remove match", remove))
             .push(ui::secondary(
                 "Exact editor…",
                 Msg::OpenEdit(Box::new((*first).clone())),
@@ -567,6 +740,8 @@ pub fn with_modal<'a>(app: &'a App, base: Element<'a, Message>) -> Element<'a, M
     match modal {
         Modal::Change {
             item,
+            scope,
+            seasons,
             query,
             results,
             searching,
@@ -581,6 +756,8 @@ pub fn with_modal<'a>(app: &'a App, base: Element<'a, Message>) -> Element<'a, M
                 app,
                 ChangeView {
                     item,
+                    scope: *scope,
+                    seasons,
                     query,
                     results,
                     searching: *searching,

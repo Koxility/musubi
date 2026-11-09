@@ -296,3 +296,24 @@ async fn shelves_use_current_endpoints_and_map_episodes() {
     assert_eq!(latest[0].library_id, "m");
     assert!(!latest[0].is_episode);
 }
+
+#[tokio::test]
+async fn seasons_carry_their_own_provider_ids() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/Shows/s1/Seasons"))
+        .and(query_param("fields", "ProviderIds,ProductionYear"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"Items": [
+            {"Id": "a", "Name": "Season 1", "IndexNumber": 1, "ProductionYear": 2019,
+             "ProviderIds": {"AniList": "101", "Tvdb": null}},
+            {"Id": "b", "Name": "Season 2", "IndexNumber": 2}
+        ]})))
+        .mount(&server)
+        .await;
+
+    let seasons = client(&server).seasons("u1", "s1").await.unwrap();
+
+    assert_eq!(seasons[0].provider_id(&["anilist"]), Some("101"));
+    assert_eq!(seasons[0].year, Some(2019));
+    assert!(seasons[1].provider_ids.is_empty());
+}

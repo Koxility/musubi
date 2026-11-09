@@ -416,6 +416,7 @@ impl Client {
                 &[
                     ("userId", user_id.to_owned()),
                     ("enableUserData", "true".to_owned()),
+                    ("fields", "ProviderIds,ProductionYear".to_owned()),
                 ],
             )
             .await?;
@@ -426,6 +427,8 @@ impl Client {
                 number: s.index_number.unwrap_or(0),
                 id: s.id,
                 name: s.name,
+                provider_ids: provider_map(s.provider_ids),
+                year: s.production_year,
             })
             .collect())
     }
