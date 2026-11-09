@@ -33,6 +33,9 @@ pub struct Detail {
     pub item: LibraryItem,
     /// Die Seite, auf der die Detailansicht geöffnet wurde. Nur dort wird sie gezeigt.
     pub origin: Page,
+    /// Navigations-Generation beim Öffnen. Nach jedem Klick in der Navigation ist sie veraltet,
+    /// und die Detailseite bleibt unsichtbar, egal wie ihr Zustand dorthin gekommen ist.
+    pub opened_at: u64,
     episodes: Vec<EpisodeRow>,
     loading: bool,
     season: Option<u32>,
@@ -196,6 +199,7 @@ pub fn open_detail(app: &mut App, item: LibraryItem) -> Task<Message> {
     app.library.detail = Some(Detail {
         item,
         origin: app.page,
+        opened_at: app.nav_generation,
         episodes: vec![],
         loading: series,
         season: None,
