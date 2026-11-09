@@ -62,6 +62,24 @@ fn names_a_later_part(title: &str) -> bool {
     })
 }
 
+/// Die Staffelnummer, die ein Titel nennt („Season 3“, „3rd Season“).
+fn named_season(title: &str) -> Option<u32> {
+    let cleaned: String = title
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { ' ' })
+        .collect();
+    let words: Vec<&str> = cleaned.split_whitespace().collect();
+    words.windows(2).find_map(|pair| match (pair[0], pair[1]) {
+        ("season", number) => number.parse().ok(),
+        (ordinal, "season") if is_ordinal(ordinal) => ordinal
+            .trim_end_matches(|c: char| c.is_ascii_alphabetic())
+            .parse()
+            .ok(),
+        _ => None,
+    })
+}
+
 fn is_year(word: &str) -> bool {
     word.len() == 4
         && word
@@ -132,15 +150,23 @@ pub struct MatchQuery<'a> {
 pub fn score_candidate(query: &MatchQuery<'_>, media: &Media) -> f64 {
     let wanted = normalize_title(query.title);
     let query_is_sequel = names_a_later_part(query.title);
+    let query_season = named_season(query.title);
     let title_score = media
         .title
         .all()
         .chain(media.synonyms.iter().map(String::as_str))
         .map(|candidate| {
             let similarity = jaro_winkler(&wanted, &normalize_title(candidate));
+            let candidate_is_sequel = names_a_later_part(candidate);
             // Die Normalisierung entfernt Staffelangaben. Ohne Abzug wären „Foo“ und
             // „Foo 2nd Season“ gleichwertig und jede Serie mit Fortsetzung müsste geprüft werden.
-            if names_a_later_part(candidate) && !query_is_sequel {
+            // Umgekehrt passt bei der Suche nach einer späteren Staffel der Anfang schlechter.
+            let wrong_part = candidate_is_sequel != query_is_sequel;
+            let wrong_number = matches!(
+                (query_season, named_season(candidate)),
+                (Some(a), Some(b)) if a != b
+            );
+            if wrong_part || wrong_number {
                 similarity - SEQUEL_PENALTY
             } else {
                 similarity
@@ -268,6 +294,127 @@ pub fn plan_chain(
         }
     }
     out
+}
+
+/// Bis zu so vielen Episoden Abweichung gelten als Recap oder Bonusfolge und nicht als eigener
+/// Teil. Ohne diese Toleranz würde eine einzige Zusatzfolge alle späteren Staffeln verschieben.
+pub const SMALL_DRIFT: u32 = 2;
+
+/// Rest eines Werks, das in einer früheren Staffel begonnen hat.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Carry {
+    pub link: ChainLink,
+    /// Bereits von früheren Staffeln belegte Episoden.
+    pub used: u32,
+}
+
+impl Carry {
+    pub fn remaining(&self) -> Option<u32> {
+        self.link.episodes.map(|e| e.saturating_sub(self.used))
+    }
+
+    /// Ob die nächste Staffel dieses Werk fortsetzt. Ein Rest von ein, zwei Episoden ist eher eine
+    /// abweichende Zählung, dann beginnt die Staffel beim nächsten Werk neu.
+    pub fn continues_into(&self, span: &SeasonSpan) -> bool {
+        self.remaining()
+            .is_some_and(|r| r > 0 && (r >= span.count || r > SMALL_DRIFT))
+    }
+}
+
+/// Ob eine Staffel ein weiteres Werk braucht. `covered` ist `None` bei offenem Ende.
+pub fn needs_more(covered: Option<u32>, count: u32) -> bool {
+    covered.is_some_and(|c| c + SMALL_DRIFT < count)
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SeasonPlan {
+    pub mappings: Vec<Mapping>,
+    /// Werk mit freien Episoden, die die nächste Staffel fortsetzen kann.
+    pub carry: Option<Carry>,
+    /// Episoden der Staffel, für die kein Werk mehr übrig war.
+    pub unmapped: u32,
+}
+
+/// Verteilt genau eine Jellyfin-Staffel auf die Werke `chain`. `used` Episoden des ersten Werks
+/// gehören schon früheren Staffeln. Jede Staffel wird so für sich verankert.
+pub fn plan_season(
+    jellyfin_id: &str,
+    span: &SeasonSpan,
+    chain: &[ChainLink],
+    used: u32,
+    source: MappingSource,
+    confidence: f64,
+) -> SeasonPlan {
+    let mut mappings = Vec::new();
+    let mut first = span.first_episode;
+    let mut remaining = span.count;
+    let mut used = used;
+    let mut carry = None;
+    for link in chain {
+        if remaining == 0 {
+            break;
+        }
+        let available = link.episodes.map(|e| e.saturating_sub(used));
+        let take = available.map_or(remaining, |a| a.min(remaining));
+        if take > 0 {
+            mappings.push(Mapping {
+                jellyfin_id: jellyfin_id.to_owned(),
+                season: span.season,
+                ep_start: first,
+                ep_end: link.episodes.map(|_| first + take - 1),
+                media_id: link.media_id,
+                offset: used as i32 + 1 - first as i32,
+                source,
+                confidence,
+                title: link.title.clone(),
+            });
+        }
+        first += take;
+        remaining -= take;
+        carry = Some(Carry {
+            link: link.clone(),
+            used: used + take,
+        });
+        used = 0;
+    }
+    SeasonPlan {
+        mappings,
+        carry: carry.filter(|c| c.remaining().is_some_and(|r| r > 0)),
+        unmapped: remaining,
+    }
+}
+
+/// Ob ein Staffelname nur die Nummer wiederholt („Season 2“, „Staffel 02“).
+fn is_generic_season_name(name: &str) -> bool {
+    normalize_title(name)
+        .split_whitespace()
+        .all(|w| matches!(w, "season" | "staffel" | "series") || w.parse::<u32>().is_ok())
+}
+
+/// Suchbegriffe für eine einzelne Staffel, der genaueste zuerst.
+pub fn season_search_terms(title: &str, season: u32, season_name: Option<&str>) -> Vec<String> {
+    let base = search_terms(title)
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| title.to_owned());
+    let mut terms = Vec::new();
+    if let Some(name) = season_name.filter(|n| !n.trim().is_empty() && !is_generic_season_name(n)) {
+        terms.push(format!("{base} {}", name.trim()));
+    }
+    terms.push(format!("{base} Season {season}"));
+    terms.push(format!("{base} {season}"));
+    terms.dedup();
+    terms
+}
+
+/// Titel, mit dem Kandidaten für eine spätere Staffel bewertet werden. Er nennt die Staffel,
+/// damit Fortsetzungen keinen Abzug bekommen.
+pub fn season_match_title(title: &str, season: u32) -> String {
+    if season > 1 {
+        format!("{title} Season {season}")
+    } else {
+        title.to_owned()
+    }
 }
 
 #[cfg(test)]
@@ -409,6 +556,27 @@ mod tests {
     }
 
     #[test]
+    fn season_search_prefers_the_named_season() {
+        let query = MatchQuery {
+            title: "Show Season 2",
+            year: None,
+            kind: ItemKind::Series,
+            episodes: Some(12),
+        };
+        let candidates = [
+            media(1, "Show", 2020, "TV", 12),
+            media(3, "Show 3rd Season", 2022, "TV", 12),
+            media(2, "Show 2nd Season", 2021, "TV", 12),
+        ];
+        let ranked = rank(&query, &candidates);
+        assert_eq!(ranked[0].0.id, 2);
+        assert!(should_auto_accept(&ranked));
+        assert_eq!(named_season("Show 3rd Season"), Some(3));
+        assert_eq!(named_season("Show: Season 2"), Some(2));
+        assert_eq!(named_season("Show"), None);
+    }
+
+    #[test]
     fn later_parts_are_detected() {
         assert!(names_a_later_part("Foo Season 2"));
         assert!(names_a_later_part("Foo 3rd Season"));
@@ -511,5 +679,96 @@ mod tests {
     fn episodes_beyond_the_chain_stay_unmapped() {
         let maps = plan(&[span(1, 1, 24)], &[link(10, Some(12))]);
         assert_eq!(resolve_episode(&maps, 1, 13), None);
+    }
+
+    fn season(span: SeasonSpan, chain: &[ChainLink], used: u32) -> SeasonPlan {
+        plan_season("x", &span, chain, used, MappingSource::Title, 1.0)
+    }
+
+    #[test]
+    fn single_season_plans_alone() {
+        let plan = season(span(1, 1, 12), &[link(10, Some(12))], 0);
+        assert_eq!(resolve_episode(&plan.mappings, 1, 12), Some((10, 12)));
+        assert_eq!(plan.carry, None);
+        assert_eq!(plan.unmapped, 0);
+    }
+
+    #[test]
+    fn season_over_two_cours_uses_both_works() {
+        let plan = season(span(1, 1, 24), &[link(10, Some(12)), link(20, Some(12))], 0);
+        assert_eq!(resolve_episode(&plan.mappings, 1, 13), Some((20, 1)));
+        assert_eq!(plan.unmapped, 0);
+    }
+
+    #[test]
+    fn work_spanning_two_seasons_is_carried_over() {
+        let first = season(span(1, 1, 12), &[link(10, Some(24))], 0);
+        let carry = first.carry.expect("half of the work is left");
+        assert_eq!(carry.used, 12);
+        assert!(carry.continues_into(&span(2, 1, 12)));
+        let second = season(
+            span(2, 1, 12),
+            std::slice::from_ref(&carry.link),
+            carry.used,
+        );
+        assert_eq!(resolve_episode(&second.mappings, 2, 1), Some((10, 13)));
+        assert_eq!(resolve_episode(&second.mappings, 2, 12), Some((10, 24)));
+    }
+
+    #[test]
+    fn small_leftover_does_not_shift_the_next_season() {
+        // AniList zählt eine Folge mehr als Jellyfin, z. B. ein Recap.
+        let first = season(span(1, 1, 12), &[link(10, Some(13))], 0);
+        let carry = first.carry.expect("one episode left");
+        assert!(!carry.continues_into(&span(2, 1, 12)));
+        // Die zweite Staffel beginnt beim nächsten Werk mit Episode 1.
+        let second = season(span(2, 1, 12), &[link(20, Some(12))], 0);
+        assert_eq!(resolve_episode(&second.mappings, 2, 1), Some((20, 1)));
+    }
+
+    #[test]
+    fn bonus_episode_stays_unmapped_instead_of_spilling_over() {
+        assert!(!needs_more(Some(12), 13));
+        assert!(!needs_more(Some(12), 14));
+        assert!(needs_more(Some(12), 24));
+        assert!(!needs_more(None, 24));
+        let plan = season(span(1, 1, 13), &[link(10, Some(12))], 0);
+        assert_eq!(plan.unmapped, 1);
+        assert_eq!(resolve_episode(&plan.mappings, 1, 13), None);
+    }
+
+    #[test]
+    fn absolute_numbering_is_anchored_per_season() {
+        let plan = season(span(2, 13, 12), &[link(20, Some(12))], 0);
+        assert_eq!(resolve_episode(&plan.mappings, 2, 13), Some((20, 1)));
+        assert_eq!(resolve_episode(&plan.mappings, 2, 24), Some((20, 12)));
+    }
+
+    #[test]
+    fn open_ended_season_takes_everything() {
+        let plan = season(span(3, 1, 5), &[link(30, None)], 0);
+        assert_eq!(plan.mappings[0].ep_end, None);
+        assert_eq!(plan.carry, None);
+        assert_eq!(resolve_episode(&plan.mappings, 3, 8), Some((30, 8)));
+    }
+
+    #[test]
+    fn short_chain_reports_unmapped_episodes() {
+        let plan = season(span(1, 1, 24), &[link(10, Some(12))], 0);
+        assert_eq!(plan.unmapped, 12);
+    }
+
+    #[test]
+    fn season_terms_use_meaningful_names_only() {
+        assert_eq!(
+            season_search_terms("Mob Psycho 100 (2016)", 2, Some("Season 2")),
+            vec!["Mob Psycho 100 Season 2", "Mob Psycho 100 2"]
+        );
+        assert_eq!(
+            season_search_terms("Attack on Titan", 4, Some("The Final Season"))[0],
+            "Attack on Titan The Final Season"
+        );
+        assert!(names_a_later_part(&season_match_title("Show", 2)));
+        assert_eq!(season_match_title("Show", 1), "Show");
     }
 }

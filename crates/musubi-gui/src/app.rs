@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use iced::keyboard::{self, Key, key::Named};
 use iced::widget::image::Handle;
-use iced::widget::{button, column, container, row, stack, text};
+use iced::widget::{button, column, container, keyed_column, row, stack, text};
 use iced::{Center, Element, Fill, Subscription, Task, Theme};
 use musubi_core::domain::MediaKind;
 use musubi_core::{
@@ -98,6 +98,9 @@ pub struct App {
     pub playback: Option<PlaybackState>,
     pub seek_preview: Option<f64>,
     pub now: i64,
+    /// Zählt Seitenwechsel. Asynchrone Ergebnisse von vorher dürfen die Ansicht nicht mehr
+    /// umstellen, und die Seite bekommt bei jedem Wechsel frischen Widget-Zustand.
+    pub nav_generation: u64,
     toast: Option<(String, bool, Instant)>,
     help: bool,
 }
@@ -209,6 +212,7 @@ impl App {
             playback: None,
             seek_preview: None,
             now: unix_now(),
+            nav_generation: 0,
             toast: None,
             help: false,
             auth,
@@ -316,6 +320,29 @@ impl App {
         Task::none()
     }
 
+    /// Setzt die Ansicht beim Wechsel der Seite zurück, auch beim erneuten Klick auf die
+    /// aktuelle Seite: Detailseite und Dialoge schließen, Scroll-Position verwerfen.
+    fn reset_view(&mut self, page: Page) {
+        self.page = page;
+        self.nav_generation += 1;
+        self.library.detail = None;
+        self.anilist.close_modal();
+        self.mapping.close_modal();
+        self.help = false;
+    }
+
+    /// Wechselt die Seite und lädt ihre Daten neu.
+    fn navigate(&mut self, page: Page) -> Task<Message> {
+        self.reset_view(page);
+        match page {
+            Page::Home => home::load(self),
+            Page::Library => library::load(self),
+            Page::Mapping => mapping::load(self),
+            Page::Sync => sync::load(self),
+            Page::AniList | Page::Settings => Task::none(),
+        }
+    }
+
     fn on_escape(&mut self) {
         if self.help {
             self.help = false;
@@ -327,12 +354,7 @@ impl App {
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::Navigate(page) => {
-                self.page = page;
-                if page == Page::Sync {
-                    return sync::load(self);
-                }
-            }
+            Message::Navigate(page) => return self.navigate(page),
             Message::Refresh => return self.load_everything(),
             Message::Tick => {
                 self.now = unix_now();
@@ -406,11 +428,28 @@ impl App {
         .into()
     }
 
+    /// Ob die Detailansicht zur aktuellen Seite gehört.
+    fn shows_detail(&self) -> bool {
+        self.library
+            .detail
+            .as_ref()
+            .is_some_and(|d| d.origin == self.page)
+    }
+
+    /// Die Seite in einem Schlüssel aus Navigation und Detailansicht. Ändert sich der Schlüssel,
+    /// baut Iced den Inhalt neu auf, statt Scroll-Position und anderen Zustand zu übernehmen.
     fn page_view(&self) -> Element<'_, Message> {
+        let key = (self.nav_generation, self.shows_detail());
+        keyed_column([(key, self.page_content())])
+            .width(Fill)
+            .height(Fill)
+            .into()
+    }
+
+    fn page_content(&self) -> Element<'_, Message> {
         match self.page {
-            Page::Home if self.library.detail.is_some() => library::detail_view(self),
+            Page::Home | Page::Library if self.shows_detail() => library::detail_view(self),
             Page::Home => home::view(self),
-            Page::Library if self.library.detail.is_some() => library::detail_view(self),
             Page::Library => library::view(self),
             Page::AniList => anilist::view(self),
             Page::Mapping => mapping::view(self),
@@ -503,6 +542,95 @@ mod tests {
             text: None,
             repeat: false,
         })
+    }
+
+    use musubi_core::domain::{ItemKind, LibraryItem};
+    use musubi_core::{CoreOptions, Paths};
+
+    async fn app(dir: &std::path::Path) -> App {
+        let options = CoreOptions {
+            anilist_endpoint: None,
+            player: None,
+        };
+        let core = Core::open(Paths::under(dir).unwrap(), options)
+            .await
+            .unwrap();
+        App::boot(core, None).0
+    }
+
+    fn show() -> LibraryItem {
+        LibraryItem {
+            id: "s1".into(),
+            kind: ItemKind::Series,
+            name: "Show".into(),
+            overview: None,
+            year: None,
+            status: None,
+            genres: vec![],
+            community_rating: None,
+            runtime_secs: None,
+            provider_ids: Default::default(),
+            has_poster: false,
+            has_backdrop: false,
+            played: false,
+            unplayed_count: None,
+            position_secs: 0,
+        }
+    }
+
+    #[tokio::test]
+    async fn every_page_switch_closes_the_detail_view_and_dialogs() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = app(dir.path()).await;
+        for (from, to) in [
+            (Page::Home, Page::Library),
+            (Page::Library, Page::AniList),
+            (Page::Library, Page::Library),
+            (Page::Home, Page::Home),
+        ] {
+            app.page = from;
+            let _ = library::open_detail(&mut app, show());
+            mapping::open_change_dialog(&mut app, show(), Some(2));
+            assert!(app.shows_detail());
+
+            let _ = app.update(Message::Navigate(to));
+
+            assert_eq!(app.page, to);
+            assert!(app.library.detail.is_none(), "{from:?} -> {to:?}");
+            assert!(!app.shows_detail());
+            assert!(!app.mapping.close_modal(), "dialog stayed open");
+        }
+    }
+
+    #[tokio::test]
+    async fn detail_only_shows_on_the_page_that_opened_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = app(dir.path()).await;
+        app.page = Page::Home;
+        let _ = library::open_detail(&mut app, show());
+        // Ein Pfad, der die Seite ohne Reset wechselt, darf keine fremde Detailseite zeigen.
+        app.page = Page::Library;
+        assert!(!app.shows_detail());
+    }
+
+    #[tokio::test]
+    async fn a_late_home_result_does_not_pull_back_to_a_detail_view() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = app(dir.path()).await;
+        app.page = Page::Home;
+        let clicked_at = app.nav_generation;
+        let _ = app.update(Message::Navigate(Page::Library));
+
+        let _ = app.update(Message::Home(home::Msg::Opened(clicked_at, Ok(show()))));
+
+        assert_eq!(app.page, Page::Library);
+        assert!(app.library.detail.is_none());
+
+        // Ohne Seitenwechsel öffnet das Ergebnis die Detailseite wie gewohnt.
+        let _ = app.update(Message::Navigate(Page::Home));
+        let now = app.nav_generation;
+        let _ = app.update(Message::Home(home::Msg::Opened(now, Ok(show()))));
+        assert!(app.shows_detail());
     }
 
     #[test]

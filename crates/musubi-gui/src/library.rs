@@ -6,11 +6,12 @@ use iced::widget::{
 };
 use iced::{Bottom, Center, Element, Fill, Length, Task};
 use musubi_core::domain::{
-    ItemKind, Library, LibraryFilters, LibraryItem, LibraryQuery, LibrarySort, is_unsure,
+    ItemKind, Library, LibraryFilters, LibraryItem, LibraryQuery, LibrarySort, Mapping,
+    MappingSource, is_unsure, season_mappings,
 };
 use musubi_core::{EpisodeRow, LibraryRow};
 
-use crate::app::{App, Message};
+use crate::app::{App, Message, Page};
 use crate::images::ImageKey;
 use crate::{anilist, mapping, theme, ui};
 
@@ -29,6 +30,8 @@ const STATUSES: [&str; 3] = [ALL_STATUSES, "Continuing", "Ended"];
 
 pub struct Detail {
     pub item: LibraryItem,
+    /// Die Seite, auf der die Detailansicht geöffnet wurde. Nur dort wird sie gezeigt.
+    pub origin: Page,
     episodes: Vec<EpisodeRow>,
     loading: bool,
     season: Option<u32>,
@@ -190,6 +193,7 @@ pub fn open_detail(app: &mut App, item: LibraryItem) -> Task<Message> {
     let series = item.kind == ItemKind::Series;
     app.library.detail = Some(Detail {
         item,
+        origin: app.page,
         episodes: vec![],
         loading: series,
         season: None,
@@ -263,9 +267,18 @@ pub fn update(app: &mut App, msg: Msg) -> Task<Message> {
                 Message::Notify,
             );
         }
-        Msg::EditEntry(item) => anilist::open_editor_for(app, &item),
-        Msg::Map(item) => mapping::open_change_dialog(app, item),
-        Msg::ConfirmMapping(id) => return mapping::confirm(app, id),
+        Msg::EditEntry(item) => {
+            let season = selected_season(app, &item.id);
+            anilist::open_editor_for(app, &item, season);
+        }
+        Msg::Map(item) => {
+            let season = selected_season(app, &item.id);
+            mapping::open_change_dialog(app, item, season);
+        }
+        Msg::ConfirmMapping(id) => {
+            let season = selected_season(app, &id);
+            return mapping::confirm(app, id, season);
+        }
     }
     Task::none()
 }
@@ -286,6 +299,25 @@ pub fn sync_mappings(app: &mut App) {
             .first()
             .and_then(|m| core.entry_for(m.media_id));
     }
+}
+
+/// Die auf der offenen Detailseite gewählte Staffel dieses Titels.
+pub fn selected_season(app: &App, id: &str) -> Option<u32> {
+    app.library
+        .detail
+        .as_ref()
+        .filter(|d| d.item.id == id && d.item.kind == ItemKind::Series)
+        .and_then(|d| d.season)
+}
+
+/// Staffeln, die die offene Detailseite dieses Titels kennt.
+pub fn detail_seasons(app: &App, id: &str) -> Vec<u32> {
+    app.library
+        .detail
+        .as_ref()
+        .filter(|d| d.item.id == id)
+        .map(seasons)
+        .unwrap_or_default()
 }
 
 /// Staffel der ersten ungesehenen Episode, sonst die erste vorhandene.
@@ -549,7 +581,16 @@ fn season_tabs(detail: &Detail) -> Element<'_, Msg> {
 
 fn anilist_summary<'a>(app: &'a App, item: &'a LibraryItem) -> Element<'a, Msg> {
     let row_data = app.library.rows.iter().find(|r| r.item.id == item.id);
-    let mapping = row_data.and_then(|r| r.mappings.first());
+    let season = selected_season(app, &item.id);
+    // Jede Staffel hat ihren eigenen AniList-Eintrag, gezeigt wird der der gewählten Staffel.
+    let season_maps: Vec<&Mapping> = row_data
+        .map(|r| match season {
+            Some(season) => season_mappings(&r.mappings, season),
+            None => r.mappings.iter().collect(),
+        })
+        .unwrap_or_default();
+    let mapping = season_maps.first().copied();
+    let unsure = season_maps.iter().any(|m| m.source == MappingSource::Guess);
     let entry = mapping.and_then(|m| app.core.entry_for(m.media_id));
     let summary = match (mapping, &entry) {
         (Some(mapping), Some(entry)) => format!(
@@ -566,10 +607,13 @@ fn anilist_summary<'a>(app: &'a App, item: &'a LibraryItem) -> Element<'a, Msg> 
             "AniList: {} · not on your list",
             ui::ellipsize(&mapping.title, 44)
         ),
+        (None, _) if season.is_some() && row_data.is_some_and(|r| !r.mappings.is_empty()) => {
+            "AniList: this season has no match".to_owned()
+        }
         (None, _) => "AniList: no match".to_owned(),
     };
     let mut actions = row![ui::muted(summary)].spacing(10).align_y(Center);
-    if row_data.is_some_and(|r| r.unsure) {
+    if unsure {
         actions = actions
             .push(ui::badge_row(
                 "? unsure, not synced".to_owned(),
