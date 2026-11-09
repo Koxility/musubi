@@ -61,7 +61,7 @@ open = "5.4"
 rpassword = "7"
 
 # GUI
-iced = { version = "0.14", features = ["image", "tokio", "advanced"] }
+iced = { version = "0.14", features = ["image", "svg", "tokio", "advanced"] }
 iced_video_player = "0.6"
 gstreamer = "0.23"
 gstreamer-app = "0.23"
@@ -69,6 +69,7 @@ gstreamer-app = "0.23"
 # Tests
 wiremock = "0.6"
 tempfile = "3"
+usvg = "0.45"
 
 [profile.release]
 lto = "thin"

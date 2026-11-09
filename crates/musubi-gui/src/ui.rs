@@ -1,14 +1,126 @@
 //! Wiederverwendbare Bausteine der Oberfläche.
 
 use iced::widget::scrollable::{Direction, Scrollbar};
+use iced::widget::tooltip::Position;
 use iced::widget::{
     Space, button, center, column, container, image, opaque, row, scrollable, sensor, space, stack,
-    text, text_input,
+    svg, text, text_input, tooltip,
 };
-use iced::{Center, ContentFit, Element, Fill, Length, Padding, Task};
+use iced::{Center, Color, ContentFit, Element, Fill, Font, Length, Padding, Task, font};
 
+use crate::icons::Icon;
 use crate::images::{ImageCache, ImageKey};
 use crate::theme;
+
+/// Halbfette Variante der Standardschrift für Titel.
+pub const SEMIBOLD: Font = Font {
+    weight: font::Weight::Semibold,
+    ..Font::DEFAULT
+};
+
+/// Button-Stil als Funktion, wie ihn `button::style` erwartet.
+pub type ButtonStyle = fn(&iced::Theme, button::Status) -> button::Style;
+
+/// Ein Icon in fester Größe und Farbe.
+pub fn icon<'a, M: 'a>(icon: Icon, size: f32, color: Color) -> Element<'a, M> {
+    svg(icon.handle())
+        .width(size)
+        .height(size)
+        .style(move |_, _| svg::Style { color: Some(color) })
+        .into()
+}
+
+/// Hängt einen kurzen Hinweis an, der beim Überfahren erscheint.
+pub fn with_tip<'a, M: 'a>(content: impl Into<Element<'a, M>>, label: &'a str) -> Element<'a, M> {
+    tooltip(
+        content,
+        container(text(label).size(12))
+            .padding([5, 9])
+            .style(theme::tooltip),
+        Position::Top,
+    )
+    .gap(8)
+    .into()
+}
+
+/// Runder Icon-Button. Ohne Nachricht ist er sichtbar abgeschwächt und nicht klickbar.
+pub fn icon_button<'a, M: Clone + 'a>(
+    glyph: Icon,
+    size: f32,
+    color: Color,
+    message: Option<M>,
+    label: &'a str,
+    style: ButtonStyle,
+) -> Element<'a, M> {
+    let tint = if message.is_some() {
+        color
+    } else {
+        Color {
+            a: color.a * 0.35,
+            ..color
+        }
+    };
+    let side = size * 1.8;
+    let content = button(center(icon(glyph, size, tint)).width(side).height(side))
+        .padding(0)
+        .style(style)
+        .on_press_maybe(message);
+    with_tip(content, label)
+}
+
+/// Button mit Icon und Beschriftung, z. B. „Play“ auf der Detailseite.
+pub fn icon_label<'a, M: Clone + 'a>(
+    glyph: Icon,
+    label: &'a str,
+    message: M,
+    style: ButtonStyle,
+    color: Color,
+) -> Element<'a, M> {
+    button(
+        row![
+            icon(glyph, 18.0, color),
+            text(label).size(15).font(SEMIBOLD).color(color)
+        ]
+        .spacing(8)
+        .align_y(Center),
+    )
+    .padding([10, 22])
+    .style(style)
+    .on_press(message)
+    .into()
+}
+
+/// Teilt Wiedergabetitel wie „Serie S01E02 - Name“ in Serie und Folge.
+pub fn split_title(title: &str) -> (&str, Option<String>) {
+    let found = title.char_indices().find_map(|(i, c)| {
+        let rest = &title[i..];
+        let code = rest.get(..7)?;
+        let bytes = code.as_bytes();
+        let shape = c == 'S'
+            && bytes[1..3].iter().all(u8::is_ascii_digit)
+            && bytes[3] == b'E'
+            && bytes[4..6].iter().all(u8::is_ascii_digit);
+        (shape && i > 0 && title[..i].ends_with(' ')).then_some(i)
+    });
+    let Some(at) = found else {
+        return (title, None);
+    };
+    let series = title[..at].trim_end();
+    let code = &title[at..];
+    let season: u32 = code[1..3].parse().unwrap_or(0);
+    let episode: u32 = code[4..6].trim_start_matches('0').parse().unwrap_or(0);
+    let name = code
+        .get(6..)
+        .map(|r| r.trim_start_matches(|c: char| c.is_ascii_digit()))
+        .map(|r| r.trim_start_matches(" - ").trim())
+        .unwrap_or("");
+    let label = if name.is_empty() {
+        format!("S{season}:E{episode}")
+    } else {
+        format!("S{season}:E{episode} · {name}")
+    };
+    (series, Some(label))
+}
 
 /// Kürzt Text mit Auslassungszeichen, weil Iced Text nicht selbst abschneidet.
 pub fn ellipsize(value: &str, max: usize) -> String {
@@ -231,6 +343,20 @@ mod tests {
         assert_eq!(countdown(30), "1m");
         assert_eq!(countdown(3_720), "1h 2m");
         assert_eq!(countdown(2 * 86_400 + 3 * 3_600 + 59), "2d 3h");
+    }
+
+    #[test]
+    fn playback_titles_split_into_series_and_episode() {
+        assert_eq!(
+            split_title("Frieren S01E07 - Like a Fairy Tale"),
+            ("Frieren", Some("S1:E7 · Like a Fairy Tale".to_owned()))
+        );
+        assert_eq!(
+            split_title("Show S02E10 - "),
+            ("Show", Some("S2:E10".to_owned()))
+        );
+        assert_eq!(split_title("Akira"), ("Akira", None));
+        assert_eq!(split_title("SPY x FAMILY"), ("SPY x FAMILY", None));
     }
 
     #[test]

@@ -29,7 +29,7 @@ Die Abhängigkeiten zeigen nur nach unten, und der Compiler erzwingt das über d
 
 ### GUI: Iced
 
-Die GUI ist reiner Rust-Code ohne Systembibliotheken wie GTK und sieht auf jedem Desktop gleich aus. Jede Seite bringt Zustand, Nachrichten und Ansicht mit, `app.rs` verbindet sie mit dem Kern. Poster werden erst geladen, wenn sie sichtbar werden. Die Cache-Dateien heißen `*.img`, deshalb liest die GUI sie als Bytes: Bei Pfaden wählt Iced den Decoder nach der Dateiendung. Der Preis: Iced hat keine virtualisierten Raster, die Bibliothek baut also für jeden Titel Widgets.
+Die GUI ist reiner Rust-Code ohne Systembibliotheken wie GTK und sieht auf jedem Desktop gleich aus. Icons sind eigene SVGs in `icons.rs`, gezeichnet von resvg. Jede Seite bringt Zustand, Nachrichten und Ansicht mit, `app.rs` verbindet sie mit dem Kern. Poster werden erst geladen, wenn sie sichtbar werden. Die Cache-Dateien heißen `*.img`, deshalb liest die GUI sie als Bytes: Bei Pfaden wählt Iced den Decoder nach der Dateiendung. Der Preis: Iced hat keine virtualisierten Raster, die Bibliothek baut also für jeden Titel Widgets.
 
 ### Player: GStreamer im Fenster, mpv als Alternative
 
@@ -58,13 +58,18 @@ Rund ein Dutzend Operationen rechtfertigen keinen Codegen-Schritt samt eingechec
 
 ### Matching
 
-1. Eine manuelle Zuordnung gewinnt immer.
-2. `ProviderIds`: AniList direkt, MyAnimeList über `Media(idMal:)`.
-3. Titelsuche mit Normalisierung und Jaro-Winkler über alle Titel und Synonyme, dazu Bonus oder Abzug für Jahr, Format und Episodenzahl. Automatisch übernommen wird ab 0.92 und mit mindestens 0.05 Abstand zum Zweitplatzierten.
-4. Alles andere bekommt ab einem Mindestwert den besten Kandidaten als unsicheren Treffer (`Guess`). Solche Titel schreiben nicht von selbst auf AniList und werden im Sync mit `Skip` vorgeschlagen, bis sie bestätigt oder geändert sind.
-5. Das Matching läuft beim Start, nach dem Login und bei *Refresh* für alle noch nie versuchten Titel. Manuelle Zuordnungen werden nie überschrieben.
+AniList führt pro Staffel, oft sogar pro Cour, einen eigenen Eintrag, Jellyfin zählt pro Staffel. Deshalb wird jede Jellyfin-Staffel einzeln zugeordnet, in dieser Reihenfolge:
 
-AniList zählt pro Werk, oft pro Cour, Jellyfin pro Staffel. `plan_chain` folgt daher den `SEQUEL`-Relationen und verteilt Staffeln auf Werke. Das deckt eine Staffel über mehrere Cours ebenso ab wie ein Werk über mehrere Staffeln und absolute Nummerierung. Jede Zuordnung gilt für einen Episodenbereich und trägt einen Offset.
+1. Eine manuelle Zuordnung der Staffel gewinnt immer und dient der nächsten Staffel als Ausgangspunkt.
+2. `ProviderIds` der Staffel selbst, also AniList direkt oder MyAnimeList über `Media(idMal:)`. Eine ID, die schon eine frühere Staffel belegt, zählt nicht, denn manche Plugins kopieren die ID der Serie in jede Staffel.
+3. Erste Staffel: `ProviderIds` der Serie, sonst Titelsuche mit Normalisierung und Jaro-Winkler über alle Titel und Synonyme, dazu Bonus oder Abzug für Jahr, Format und Episodenzahl. Automatisch übernommen wird ab 0.92 und mit mindestens 0.05 Abstand zum Zweitplatzierten.
+4. Spätere Staffeln: der Rest des Werks der Vorstaffel, wenn es sich über beide erstreckt, sonst die nächste `SEQUEL`-Fortsetzung. Filme, OVAs und Specials dazwischen werden übersprungen, ihre Fortsetzungen aber weiter verfolgt.
+5. Rückfall: Suche nach der Staffel selbst, etwa „Titel Season 2“ oder „Titel <Staffelname>“. Kandidaten ohne oder mit falscher Staffelnummer bekommen einen Abzug.
+6. Alles andere bekommt ab einem Mindestwert den besten Kandidaten als unsicheren Treffer (`Guess`). Findet sich nichts, bleibt nur diese Staffel offen. Unsicher gilt pro Werk: Eine geratene Staffel schreibt nicht von selbst auf AniList und wird im Sync mit `Skip` vorgeschlagen, die übrigen Staffeln synchronisieren normal.
+
+`plan_season` verankert jede Staffel neu. Eine Staffel über mehrere Cours bekommt mehrere Werke, ein Werk über mehrere Staffeln wird fortgesetzt, absolute Nummerierung geht über den Offset. Weicht die Zählung nur um bis zu zwei Folgen ab (Recap, Bonusfolge), beginnt die nächste Staffel trotzdem bei Episode 1 ihres eigenen Werks, statt sich zu verschieben. Jede Zuordnung gilt für einen Episodenbereich und trägt einen Offset.
+
+Das Matching läuft beim Start, nach dem Login und bei *Refresh* für alle noch nie versuchten Titel. Nach dem Update auf die Staffel-Logik (`matching_version` 2) werden automatische Zuordnungen von Serien mit mehreren Staffeln einmal neu geplant. Die erste Staffel behält dabei ihr Werk, manuelle Staffeln werden nie überschrieben. Im Ändern-Dialog lässt sich jede Staffel einzeln oder alle auf einmal zuordnen.
 
 ### Sync-Regeln
 

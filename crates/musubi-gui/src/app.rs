@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use iced::keyboard::{self, Key, key::Named};
 use iced::widget::image::Handle;
-use iced::widget::{button, column, container, keyed_column, row, stack, text};
+use iced::widget::{button, column, container, row, stack, text};
 use iced::{Center, Element, Fill, Subscription, Task, Theme};
 use musubi_core::domain::MediaKind;
 use musubi_core::{
@@ -43,8 +43,8 @@ const SHORTCUTS: [(&str, &str); 11] = [
     ("Ctrl+1 to 6", "Switch page"),
     ("Ctrl+R", "Refresh"),
     (
-        "Space, Left / Right, F",
-        "In the player: pause, seek, fullscreen",
+        "Space, Left / Right, F, M",
+        "In the player: pause, seek, fullscreen, mute",
     ),
     ("Ctrl+P", "Play or pause"),
     ("Alt+Left / Right", "Seek 10 seconds"),
@@ -101,6 +101,8 @@ pub struct App {
     /// Zählt Seitenwechsel. Asynchrone Ergebnisse von vorher dürfen die Ansicht nicht mehr
     /// umstellen, und die Seite bekommt bei jedem Wechsel frischen Widget-Zustand.
     pub nav_generation: u64,
+    /// Zählt jeden Wechsel der sichtbaren Ansicht (Seite, Detailseite auf oder zu).
+    view_epoch: u64,
     toast: Option<(String, bool, Instant)>,
     help: bool,
 }
@@ -144,6 +146,7 @@ fn on_key(event: keyboard::Event) -> Option<Message> {
             Key::Named(Named::ArrowLeft) => Some(video::Key::Back),
             Key::Named(Named::ArrowRight) => Some(video::Key::Forward),
             Key::Character("f") => Some(video::Key::Fullscreen),
+            Key::Character("m") => Some(video::Key::Mute),
             _ => None,
         };
         if let Some(video_key) = video_key {
@@ -213,6 +216,7 @@ impl App {
             seek_preview: None,
             now: unix_now(),
             nav_generation: 0,
+            view_epoch: 0,
             toast: None,
             help: false,
             auth,
@@ -325,6 +329,7 @@ impl App {
     fn reset_view(&mut self, page: Page) {
         self.page = page;
         self.nav_generation += 1;
+        self.view_epoch += 1;
         self.library.detail = None;
         self.anilist.close_modal();
         self.mapping.close_modal();
@@ -348,8 +353,20 @@ impl App {
             self.help = false;
         } else if self.anilist.close_modal() || self.mapping.close_modal() {
         } else if self.page == Page::Home || self.page == Page::Library {
-            self.library.detail = None;
+            self.close_detail();
         }
+    }
+
+    /// Schließt die Detailseite. Die Liste dahinter bekommt frischen Widget-Zustand.
+    pub fn close_detail(&mut self) {
+        if self.library.detail.take().is_some() {
+            self.view_epoch += 1;
+        }
+    }
+
+    /// Meldet eine neu geöffnete Ansicht, z. B. eine Detailseite.
+    pub fn view_changed(&mut self) {
+        self.view_epoch += 1;
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
@@ -436,14 +453,17 @@ impl App {
             .is_some_and(|d| d.origin == self.page)
     }
 
-    /// Die Seite in einem Schlüssel aus Navigation und Detailansicht. Ändert sich der Schlüssel,
-    /// baut Iced den Inhalt neu auf, statt Scroll-Position und anderen Zustand zu übernehmen.
+    /// Die aktuelle Seite. Iced übernimmt Widget-Zustand wie die Scroll-Position, solange an
+    /// derselben Stelle derselbe Widget-Typ steht. Mit jedem Ansichtswechsel wechselt deshalb
+    /// die Verschachtelungstiefe, und die neue Ansicht beginnt garantiert oben und frisch.
     fn page_view(&self) -> Element<'_, Message> {
-        let key = (self.nav_generation, self.shows_detail());
-        keyed_column([(key, self.page_content())])
-            .width(Fill)
-            .height(Fill)
-            .into()
+        let content = self.page_content();
+        let content = if self.view_epoch.is_multiple_of(2) {
+            content
+        } else {
+            container(content).width(Fill).height(Fill).into()
+        };
+        container(content).width(Fill).height(Fill).into()
     }
 
     fn page_content(&self) -> Element<'_, Message> {
@@ -600,6 +620,28 @@ mod tests {
             assert!(!app.shows_detail());
             assert!(!app.mapping.close_modal(), "dialog stayed open");
         }
+    }
+
+    #[tokio::test]
+    async fn every_view_change_gets_fresh_widget_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = app(dir.path()).await;
+        app.page = Page::Library;
+        let mut last = app.view_epoch;
+        let mut changed = |app: &App| {
+            let flipped = app.view_epoch % 2 != last % 2;
+            last = app.view_epoch;
+            flipped
+        };
+        let _ = library::open_detail(&mut app, show());
+        assert!(changed(&app), "opening the detail view");
+        app.close_detail();
+        assert!(changed(&app), "closing the detail view");
+        let _ = library::open_detail(&mut app, show());
+        assert!(changed(&app));
+        // Seitenwechsel bei offener Detailseite ist ein einziger Wechsel, kein doppelter.
+        let _ = app.update(Message::Navigate(Page::Home));
+        assert!(changed(&app), "switching the page");
     }
 
     #[tokio::test]
