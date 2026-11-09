@@ -11,9 +11,7 @@ workspace = true
 
 [dependencies]
 musubi-core.workspace = true
-musubi-store.workspace = true
-musubi-tui = { workspace = true, optional = true }
-musubi-gui = { workspace = true, optional = true }
+musubi-gui.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
@@ -22,8 +20,3 @@ tracing-appender.workspace = true
 clap.workspace = true
 rpassword.workspace = true
 secrecy.workspace = true
-
-[features]
-default = ["gui", "tui"]
-gui = ["dep:musubi-gui"]
-tui = ["dep:musubi-tui"]

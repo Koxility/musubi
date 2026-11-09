@@ -77,7 +77,7 @@ pub fn decide_watched(
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyncDirection {
     /// Jellyfin-Fortschritt nach AniList übertragen.
     Push,
@@ -87,7 +87,7 @@ pub enum SyncDirection {
 }
 
 /// Eine Abweichung zwischen Jellyfin und AniList.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyncRow {
     pub series_id: String,
     pub series_title: String,

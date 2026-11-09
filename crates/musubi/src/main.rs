@@ -4,11 +4,10 @@ use std::io::{BufRead, Write};
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand, ValueEnum};
-#[cfg(feature = "gui")]
-use musubi_core::PlayerCommand;
 use musubi_core::domain::MediaKind;
-use musubi_core::{AniListLoginFlow, Core, CoreOptions, Paths, SyncDirection, oauth};
-use musubi_store::DefaultUi;
+use musubi_core::{
+    AniListLoginFlow, Core, CoreOptions, Paths, PlayerCommand, SyncDirection, oauth,
+};
 use secrecy::SecretString;
 use tracing_subscriber::EnvFilter;
 
@@ -31,8 +30,6 @@ enum ServiceArg {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Terminal-Oberfläche starten
-    Tui,
     /// Grafische Oberfläche starten
     Gui,
     /// Bei einem Dienst anmelden
@@ -182,53 +179,13 @@ fn core_options() -> CoreOptions {
     options
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Ui {
-    Gui,
-    Tui,
-}
-
-fn choose_ui(default: DefaultUi) -> Ui {
-    let has_display =
-        std::env::var_os("WAYLAND_DISPLAY").is_some() || std::env::var_os("DISPLAY").is_some();
-    match default {
-        DefaultUi::Gui => Ui::Gui,
-        DefaultUi::Tui => Ui::Tui,
-        DefaultUi::Auto if has_display && cfg!(feature = "gui") => Ui::Gui,
-        DefaultUi::Auto => Ui::Tui,
-    }
-}
-
-fn start_ui(runtime: &tokio::runtime::Runtime, core: Core, ui: Ui) -> Result<()> {
-    match ui {
-        Ui::Gui => {
-            #[cfg(feature = "gui")]
-            {
-                let _enter = runtime.enter();
-                musubi_gui::run(core.clone())?;
-                runtime.block_on(async {
-                    let _ = core.player_command(PlayerCommand::Stop).await;
-                });
-                Ok(())
-            }
-            #[cfg(not(feature = "gui"))]
-            {
-                let _ = (runtime, core);
-                bail!("this build has no GUI, use `musubi tui`")
-            }
-        }
-        Ui::Tui => {
-            #[cfg(feature = "tui")]
-            {
-                runtime.block_on(musubi_tui::run(core))
-            }
-            #[cfg(not(feature = "tui"))]
-            {
-                let _ = (runtime, core);
-                bail!("this build has no TUI, use `musubi gui`")
-            }
-        }
-    }
+fn run_gui(runtime: &tokio::runtime::Runtime, core: Core) -> Result<()> {
+    let _enter = runtime.enter();
+    musubi_gui::run(core.clone())?;
+    runtime.block_on(async {
+        let _ = core.player_command(PlayerCommand::Stop).await;
+    });
+    Ok(())
 }
 
 fn main() -> Result<()> {
@@ -240,9 +197,7 @@ fn main() -> Result<()> {
     let core = runtime.block_on(Core::open(paths, core_options()))?;
 
     match cli.command {
-        None => start_ui(&runtime, core.clone(), choose_ui(core.config().ui.default))?,
-        Some(Command::Tui) => start_ui(&runtime, core, Ui::Tui)?,
-        Some(Command::Gui) => start_ui(&runtime, core, Ui::Gui)?,
+        None | Some(Command::Gui) => run_gui(&runtime, core)?,
         Some(Command::Login {
             service,
             pin,

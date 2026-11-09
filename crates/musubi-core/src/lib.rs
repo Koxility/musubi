@@ -1,4 +1,4 @@
-//! Fachlogik von Musubi und die gemeinsame Schnittstelle für GUI und TUI.
+//! Fachlogik von Musubi und die Schnittstelle für die GUI.
 
 mod anilist_ops;
 mod auth;

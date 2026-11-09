@@ -1,4 +1,4 @@
-//! Lokale Attrappen von Jellyfin und AniList, um die Oberflächen ohne echte Server zu starten.
+//! Lokale Attrappen von Jellyfin und AniList, um die GUI ohne echte Server zu starten.
 //!
 //! ```text
 //! cargo run -p musubi-core --example demo_backend

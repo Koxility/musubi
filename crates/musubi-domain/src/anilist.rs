@@ -86,26 +86,6 @@ impl ListStatus {
     }
 }
 
-#[derive(Debug, Error, PartialEq, Eq)]
-#[error("unknown list status `{0}`")]
-pub struct ParseStatusError(pub String);
-
-impl FromStr for ListStatus {
-    type Err = ParseStatusError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.trim().to_ascii_lowercase().as_str() {
-            "current" | "watching" | "reading" | "w" => Ok(Self::Current),
-            "planning" | "planned" | "plan" | "p" => Ok(Self::Planning),
-            "completed" | "complete" | "done" | "c" => Ok(Self::Completed),
-            "dropped" | "drop" | "d" => Ok(Self::Dropped),
-            "paused" | "pause" | "hold" => Ok(Self::Paused),
-            "repeating" | "rewatching" | "rereading" | "r" => Ok(Self::Repeating),
-            _ => Err(ParseStatusError(s.to_owned())),
-        }
-    }
-}
-
 /// Bewertungsformat des Nutzers. Intern arbeitet Musubi immer mit `scoreRaw` (0..=100).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -550,13 +530,6 @@ mod tests {
         assert!("2023-02-29".parse::<FuzzyDate>().is_err());
         assert!("2023-13".parse::<FuzzyDate>().is_err());
         assert!("2023-01-01-01".parse::<FuzzyDate>().is_err());
-    }
-
-    #[test]
-    fn status_accepts_aliases() {
-        assert_eq!("watching".parse(), Ok(ListStatus::Current));
-        assert_eq!("REWATCHING".parse(), Ok(ListStatus::Repeating));
-        assert!("nonsense".parse::<ListStatus>().is_err());
     }
 
     #[test]

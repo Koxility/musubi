@@ -1,10 +1,10 @@
 //! Hauptzustand: verbindet Seiten, Kern, Tastenkürzel und Dialoge.
 
 use std::hash::{Hash, Hasher};
-use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use iced::keyboard::{self, Key, key::Named};
+use iced::widget::image::Handle;
 use iced::widget::{button, column, container, row, stack, text};
 use iced::{Center, Element, Fill, Subscription, Task, Theme};
 use musubi_core::domain::MediaKind;
@@ -59,7 +59,7 @@ pub enum Message {
     Escape,
     ToggleHelp,
     Core(CoreEvent),
-    ImageLoaded(ImageKey, Result<PathBuf, String>),
+    ImageLoaded(ImageKey, Result<Handle, String>),
     Notify(Result<(), String>),
     Home(home::Msg),
     Library(library::Msg),
@@ -242,7 +242,7 @@ impl App {
 
     pub fn want_image(&mut self, key: ImageKey) -> Task<Message> {
         match self.images.request(&self.core, key) {
-            Some(task) => task.map(|(key, path)| Message::ImageLoaded(key, path)),
+            Some(task) => task.map(|(key, result)| Message::ImageLoaded(key, result)),
             None => Task::none(),
         }
     }
@@ -319,7 +319,7 @@ impl App {
             Message::Escape => self.on_escape(),
             Message::ToggleHelp => self.help = !self.help,
             Message::Core(event) => return self.on_core_event(event),
-            Message::ImageLoaded(key, path) => self.images.loaded(key, path),
+            Message::ImageLoaded(key, result) => self.images.loaded(key, result),
             Message::Notify(result) => self.report(result),
             Message::Home(msg) => return home::update(self, msg),
             Message::Library(msg) => return library::update(self, msg),

@@ -55,7 +55,7 @@ pub(crate) struct Inner {
     pub http: reqwest::Client,
 }
 
-/// Schnittstelle für GUI und TUI. Klonen ist billig.
+/// Schnittstelle für die GUI. Klonen ist billig.
 #[derive(Clone)]
 pub struct Core {
     pub(crate) inner: Arc<Inner>,
@@ -68,7 +68,7 @@ pub struct CoreOptions {
     pub player: Option<Arc<dyn PlayerBackend>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct AuthStatus {
     pub jellyfin_user: Option<String>,
     pub jellyfin_url: Option<String>,
@@ -176,7 +176,7 @@ impl Inner {
         }
     }
 
-    /// Meldet Drosselungen des Rate-Limiters an die Oberflächen.
+    /// Meldet Drosselungen des Rate-Limiters an die GUI.
     pub fn watch_rate_limit(self: &Arc<Self>, client: &musubi_anilist::Client) {
         let mut notices = client.limiter().subscribe();
         let weak = Arc::downgrade(self);

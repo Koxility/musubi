@@ -23,12 +23,10 @@ musubi-anilist = { path = "crates/musubi-anilist" }
 musubi-player = { path = "crates/musubi-player" }
 musubi-store = { path = "crates/musubi-store" }
 musubi-core = { path = "crates/musubi-core" }
-musubi-tui = { path = "crates/musubi-tui" }
 musubi-gui = { path = "crates/musubi-gui" }
 
 # Async
 tokio = { version = "1.54", features = ["rt-multi-thread", "macros", "net", "process", "sync", "time", "signal", "io-util", "fs"] }
-futures = "0.3"
 async-trait = "0.1"
 
 # HTTP und Serialisierung
@@ -61,8 +59,6 @@ strsim = "0.11"
 clap = { version = "4.6", features = ["derive"] }
 open = "5.4"
 rpassword = "7"
-
-# TUI
 
 # GUI
 iced = { version = "0.14", features = ["image", "tokio", "advanced"] }

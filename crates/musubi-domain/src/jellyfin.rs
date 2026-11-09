@@ -108,8 +108,7 @@ pub enum LibrarySort {
 }
 
 /// Such- und Filterkriterien für die Bibliothek.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct LibraryQuery {
     pub library_id: Option<String>,
     pub search: Option<String>,

@@ -7,8 +7,6 @@ use musubi_domain::{
     ShelfItem, resolve_episode,
 };
 
-use serde::Serialize;
-
 use crate::inner::now;
 use crate::{Core, CoreError, Result};
 
@@ -16,15 +14,15 @@ const CACHE_LIBRARY: &str = "library.default";
 const SHELF_LIMIT: u32 = 24;
 
 /// Die Regale der Startseite.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct HomeShelves {
     pub continue_watching: Vec<ShelfItem>,
     pub next_up: Vec<ShelfItem>,
     pub latest: Vec<ShelfItem>,
 }
 
-/// Eine Zeile der Bibliothek, wie beide Oberflächen sie anzeigen.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+/// Eine Zeile der Bibliothek, wie die GUI sie anzeigt.
+#[derive(Debug, Clone, PartialEq)]
 pub struct LibraryRow {
     pub item: LibraryItem,
     pub mappings: Vec<Mapping>,
@@ -33,7 +31,7 @@ pub struct LibraryRow {
     pub needs_review: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct EpisodeRow {
     pub episode: Episode,
     pub anilist: Option<(i64, u32)>,

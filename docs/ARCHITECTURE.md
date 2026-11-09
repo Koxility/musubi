@@ -4,12 +4,10 @@
 
 ```
                  musubi (Binary: clap, Logging, Start)
-                   │                      │
-       tui/ (Ink, TypeScript)
-              │ JSON über Unix-Socket
-             musubi-tui              musubi-gui
-          (Start, RPC-Server)       (Iced, Elm-Muster)
-                   └──────────┬───────────┘
+                              │
+                         musubi-gui
+                     (Iced, Elm-Muster)
+                              │
                          musubi-core
         Fassade · Matching · Sync-Regeln · Outbox · Wiedergabe
           │             │              │             │
@@ -21,21 +19,17 @@
                      reine Typen, kein IO
 ```
 
-Die Abhängigkeiten zeigen nur nach unten, und der Compiler erzwingt das über die Crate-Grenzen. Die Oberflächen hängen nur am Kern und kennen weder HTTP noch mpv. Im Workspace gilt `unsafe_code = "forbid"`.
+Die Abhängigkeiten zeigen nur nach unten, und der Compiler erzwingt das über die Crate-Grenzen. Die GUI hängt nur am Kern und kennt weder HTTP noch mpv. Im Workspace gilt `unsafe_code = "forbid"`.
 
-### Vertrag zwischen Kern und Oberflächen
+### Vertrag zwischen Kern und GUI
 
-`Core` ist billig klonbar und bietet typisierte async-Methoden, dazu `subscribe()` für Ereignisse wie Wiedergabefortschritt, geänderte Listen oder Rate-Limits. Beide Oberflächen sprechen ausschließlich mit dieser Schnittstelle. Funktionen entstehen dadurch einmal im Kern und nicht pro Oberfläche.
+`Core` ist billig klonbar und bietet typisierte async-Methoden, dazu `subscribe()` für Ereignisse wie Wiedergabefortschritt, geänderte Listen oder Rate-Limits. Die GUI spricht ausschließlich mit dieser Schnittstelle. Funktionen entstehen dadurch einmal im Kern und nicht pro Oberfläche.
 
 ## Technologie-Entscheidungen
 
 ### GUI: Iced
 
-Die GUI ist reiner Rust-Code ohne Systembibliotheken wie GTK und sieht auf jedem Desktop gleich aus. Jede Seite bringt Zustand, Nachrichten und Ansicht mit, `app.rs` verbindet sie mit dem Kern. Poster werden erst geladen, wenn sie sichtbar werden. Der Preis: Iced hat keine virtualisierten Raster, die Bibliothek baut also für jeden Titel Widgets.
-
-### TUI: Ink und Yoga
-
-Die TUI ist ein eigenes TypeScript-Programm, das Bun zu einer eigenständigen Datei bündelt. `musubi tui` startet es, gibt ihm das Terminal und bedient es über einen Unix-Socket in einem privaten Verzeichnis. Der Rust-Kern mit Outbox, Sync und mpv bleibt im Elternprozess. Pro Nachricht geht eine JSON-Zeile über den Socket, Parameter werden nie protokolliert, weil sie Passwörter enthalten können. Yoga übernimmt das Layout. `store.ts` hält Zustand und Bedienlogik ohne Rendering, so lässt sich die Bedienung ohne Terminal testen. Der Preis: Bun wird zum Bauen gebraucht, die Datei ist rund 87 MB groß, und Ink kann keine Poster anzeigen.
+Die GUI ist reiner Rust-Code ohne Systembibliotheken wie GTK und sieht auf jedem Desktop gleich aus. Jede Seite bringt Zustand, Nachrichten und Ansicht mit, `app.rs` verbindet sie mit dem Kern. Poster werden erst geladen, wenn sie sichtbar werden. Die Cache-Dateien heißen `*.img`, deshalb liest die GUI sie als Bytes: Bei Pfaden wählt Iced den Decoder nach der Dateiendung. Der Preis: Iced hat keine virtualisierten Raster, die Bibliothek baut also für jeden Titel Widgets.
 
 ### Player: mpv als Prozess über JSON-IPC
 
@@ -107,7 +101,7 @@ Der Rate-Limiter startet mit dem gemessenen Limit von 30 Anfragen pro Minute, ü
 - Mit dem aktuellen Limit von 30 Anfragen pro Minute dauert die erste Zuordnung einer großen Bibliothek spürbar, weil jeder Titel eine bis mehrere Anfragen braucht.
 - Eigene CA-Zertifikate kommen ausschließlich aus dem System-Store.
 - Umbenennen einer Custom List ist bei AniList nicht atomar. Bricht der Vorgang ab, existieren beide Listen.
-- Die Oberflächen sind nur auf Englisch.
+- Die Oberfläche ist nur auf Englisch.
 
 ## Mögliche Erweiterungen
 

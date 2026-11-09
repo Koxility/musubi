@@ -2841,8 +2841,6 @@ dependencies = [
  "clap",
  "musubi-core",
  "musubi-gui",
- "musubi-store",
- "musubi-tui",
  "rpassword",
  "secrecy",
  "tokio",
@@ -2917,6 +2915,7 @@ dependencies = [
  "musubi-store",
  "open",
  "secrecy",
+ "tempfile",
  "tokio",
  "tracing",
 ]
@@ -2970,22 +2969,6 @@ dependencies = [
  "toml",
  "tracing",
  "zbus-secret-service-keyring-store",
-]
-
-[[package]]
-name = "musubi-tui"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "musubi-core",
- "musubi-domain",
- "musubi-store",
- "secrecy",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tracing",
 ]
 
 [[package]]

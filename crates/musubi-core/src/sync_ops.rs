@@ -12,7 +12,7 @@ use crate::inner::now;
 use crate::sync::{SyncDecision, SyncDirection, SyncRow, decide_watched, suggest_direction};
 use crate::{Core, CoreEvent, Result};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SyncReport {
     pub pushed: u32,
     pub pulled: u32,

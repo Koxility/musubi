@@ -1,6 +1,5 @@
 //! Nicht geheime Einstellungen aus `config.toml`.
 
-use std::collections::BTreeMap;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -27,7 +26,6 @@ pub struct Config {
     pub player: PlayerConfig,
     pub secrets: SecretsConfig,
     pub ui: UiConfig,
-    pub tui: TuiConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -125,28 +123,10 @@ pub struct SecretsConfig {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum DefaultUi {
-    /// GUI, wenn ein Display vorhanden ist, sonst TUI.
-    #[default]
-    Auto,
-    Gui,
-    Tui,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct UiConfig {
-    pub default: DefaultUi,
     /// Die geführte Einrichtung wurde abgeschlossen oder bewusst beendet.
     pub setup_completed: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(default)]
-pub struct TuiConfig {
-    /// Überschreibt Tasten, z. B. `play = "p"`.
-    pub keys: BTreeMap<String, String>,
 }
 
 impl Config {
@@ -184,13 +164,24 @@ mod tests {
     }
 
     #[test]
+    fn settings_of_the_removed_tui_are_ignored() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "[ui]\ndefault = \"tui\"\nsetup_completed = true\n\n[tui]\nposters = true\n\n[tui.keys]\nplay = \"p\"\n",
+        )
+        .unwrap();
+        assert!(Config::load(&path).unwrap().ui.setup_completed);
+    }
+
+    #[test]
     fn config_round_trips() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
         let mut config = Config::default();
         config.jellyfin.url = Some("https://example.org".into());
         config.secrets.backend = SecretBackend::SecretService;
-        config.tui.keys.insert("play".into(), "p".into());
         config.save(&path).unwrap();
         assert_eq!(Config::load(&path).unwrap(), config);
     }

@@ -20,3 +20,6 @@ secrecy.workspace = true
 chrono.workspace = true
 open.workspace = true
 iced.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

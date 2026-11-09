@@ -1,11 +1,10 @@
 use std::time::Duration;
 
 use musubi_domain::MediaKind;
-use serde::Serialize;
 
 use crate::Service;
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PlaybackState {
     pub item_id: String,
     pub title: String,
@@ -14,9 +13,8 @@ pub struct PlaybackState {
     pub paused: bool,
 }
 
-/// Benachrichtigungen an die Oberflächen.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(tag = "type", content = "data")]
+/// Benachrichtigungen an die GUI.
+#[derive(Debug, Clone, PartialEq)]
 pub enum CoreEvent {
     Playback(PlaybackState),
     PlaybackEnded,
