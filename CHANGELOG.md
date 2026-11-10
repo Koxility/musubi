@@ -2,6 +2,13 @@
 
 All notable changes to Musubi are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.1.1] - 2026-11-10
+
+### Fixed
+
+- The application launcher entry from `install.sh` now points at the installed binary, so it also works when `~/.local/bin` is not on the desktop session's `PATH`.
+- `install.sh` prints the exact command to add `~/.local/bin` to the `PATH` for fish, bash and zsh.
+
 ## [0.1.0] - 2026-11-10
 
 First release.
@@ -36,4 +43,5 @@ First release.
 - Playback needs GStreamer with `gst-plugins-base`, `-good`, `-bad` and `gst-libav`.
 - You need your own AniList client ID; see the README.
 
+[0.1.1]: https://github.com/Koxility/musubi/releases/tag/v0.1.1
 [0.1.0]: https://github.com/Koxility/musubi/releases/tag/v0.1.0

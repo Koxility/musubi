@@ -45,7 +45,13 @@ tar xzf musubi-*-x86_64-linux.tar.gz
 cd musubi-*-x86_64-linux && ./install.sh
 ```
 
-This puts `musubi` into `~/.local/bin` and adds it to your application launcher. Make sure `~/.local/bin` is on your `PATH`.
+This puts `musubi` into `~/.local/bin` and adds it to your application launcher. The launcher works right away.
+
+To also start `musubi` from a terminal, `~/.local/bin` has to be on your `PATH`. `install.sh` prints the command for your shell if it isn't. For fish (the default on CachyOS):
+
+```bash
+fish_add_path ~/.local/bin
+```
 
 To build from source instead, see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
