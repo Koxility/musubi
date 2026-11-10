@@ -22,7 +22,7 @@ Build and install into `~/.cargo/bin`:
 cargo install --locked --path crates/musubi
 ```
 
-Add the launcher entry and icon (optional):
+Add the launcher entry and icon (optional). The entry starts `musubi` from your `PATH`, so `~/.cargo/bin` has to be on it, also for the desktop session:
 
 ```bash
 install -Dm644 packaging/musubi.desktop ~/.local/share/applications/musubi.desktop
@@ -68,7 +68,7 @@ Code comments are written in German. The UI, docs and commit messages are in Eng
 
 ## Releasing
 
-1. Set the version in `Cargo.toml` (`[workspace.package]`).
+1. Set the version in `Cargo.toml` (`[workspace.package]`) and run `cargo build` once, so `Cargo.lock` picks up the new version. The release workflow builds with `--locked` and fails otherwise.
 2. Add a `## [x.y.z] - YYYY-MM-DD` section to `CHANGELOG.md`.
 3. Merge to `master`, then tag and push:
 
