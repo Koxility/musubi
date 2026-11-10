@@ -1,48 +1,27 @@
-//! Durchstich gegen Mock-Server für Jellyfin und AniList und das echte mpv.
+//! Durchstich gegen Mock-Server für Jellyfin und AniList und einen Player nach Drehbuch.
 
 use std::path::Path;
-use std::process::Command;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use async_trait::async_trait;
 use musubi_core::domain::{
     EntryPatch, ItemKind, LibraryItem, ListStatus, Mapping, MappingSource, MediaKind,
 };
 use musubi_core::{
-    Config, Core, CoreEvent, CoreOptions, MatchOutcome, Paths, PlayerCommand, Service,
-    SyncDirection,
+    Config, Core, CoreError, CoreEvent, CoreOptions, EndReason, MatchOutcome, OpenRequest, Paths,
+    PlayItem, PlayerBackend, PlayerCommand, PlayerError, PlayerEvent, PlayerSession, Service,
+    SessionHandle, SyncDirection,
 };
+use secrecy::ExposeSecret;
 use secrecy::SecretString;
 use serde_json::{Value, json};
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, mpsc};
 use tokio::time::timeout;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
 const JELLYFIN_TOKEN: &str = "jf-secret-token";
-
-fn have(binary: &str) -> bool {
-    Command::new(binary).arg("-version").output().is_ok()
-        || Command::new(binary).arg("--version").output().is_ok()
-}
-
-fn test_video(dir: &Path) -> Vec<u8> {
-    let path = dir.join("video.mkv");
-    let status = Command::new("ffmpeg")
-        .args([
-            "-v",
-            "error",
-            "-f",
-            "lavfi",
-            "-i",
-            "testsrc=duration=4:size=64x64:rate=10",
-        ])
-        .args(["-c:v", "mpeg4", "-y"])
-        .arg(&path)
-        .status()
-        .unwrap();
-    assert!(status.success());
-    std::fs::read(path).unwrap()
-}
 
 fn episode(id: &str, number: u32, played: bool, position_ticks: u64) -> Value {
     json!({
@@ -66,33 +45,7 @@ fn saved_entry(media_id: i64, progress: u32) -> Value {
     })
 }
 
-/// Beantwortet Range-Anfragen wie der echte Server, sonst kann mpv nicht zur Resume-Position.
-fn ranged(request: &Request, video: &[u8]) -> ResponseTemplate {
-    let base = |status| {
-        ResponseTemplate::new(status)
-            .insert_header("Content-Type", "video/x-matroska")
-            .insert_header("Accept-Ranges", "bytes")
-    };
-    let start = request
-        .headers
-        .get("range")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("bytes="))
-        .and_then(|v| v.split('-').next())
-        .and_then(|v| v.parse::<usize>().ok());
-    match start {
-        Some(start) if start < video.len() => base(206)
-            .insert_header(
-                "Content-Range",
-                format!("bytes {start}-{}/{}", video.len() - 1, video.len()),
-            )
-            .set_body_bytes(video[start..].to_vec()),
-        Some(_) => base(416),
-        None => base(200).set_body_bytes(video.to_vec()),
-    }
-}
-
-async fn mock_jellyfin(video: Vec<u8>) -> MockServer {
+async fn mock_jellyfin() -> MockServer {
     let server = MockServer::start().await;
     let ok = |body: Value| ResponseTemplate::new(200).set_body_json(body);
     let routes = [
@@ -140,11 +93,6 @@ async fn mock_jellyfin(video: Vec<u8>) -> MockServer {
             .await;
     }
     Mock::given(method("GET"))
-        .and(path("/Videos/e1/stream"))
-        .respond_with(move |request: &Request| ranged(request, &video))
-        .mount(&server)
-        .await;
-    Mock::given(method("GET"))
         .and(path("/Shows/s1/Episodes"))
         .respond_with(ok(json!({"Items": [episode("e1", 1, false, 10_000_000)]})))
         .mount(&server)
@@ -184,18 +132,111 @@ async fn mock_anilist(entries: Value) -> MockServer {
 }
 
 async fn core(root: &Path, anilist: &MockServer) -> Core {
+    core_with_player(root, anilist, None).await
+}
+
+async fn core_with_player(
+    root: &Path,
+    anilist: &MockServer,
+    player: Option<Arc<dyn PlayerBackend>>,
+) -> Core {
     let paths = Paths::under(root).unwrap();
-    let mut config = Config::default();
-    config.player.hwdec = "no".into();
-    config.player.extra_args = ["--no-config", "--vo=null", "--ao=null", "--force-window=no"]
-        .map(String::from)
-        .to_vec();
-    config.save(&paths.config_file()).unwrap();
+    Config::default().save(&paths.config_file()).unwrap();
     let options = CoreOptions {
         anilist_endpoint: Some(anilist.uri()),
-        player: None,
+        player,
     };
     Core::open(paths, options).await.unwrap()
+}
+
+/// Spielt eine Folge nach festem Ablauf ab, statt ein Video zu öffnen: Start an der
+/// Resume-Position, Pause beim ersten Umschalten, Ende beim zweiten.
+#[derive(Default)]
+struct ScriptedPlayer {
+    opened: Mutex<Vec<OpenRequest>>,
+}
+
+struct ScriptedSession {
+    events: mpsc::Sender<PlayerEvent>,
+    toggles: Mutex<u32>,
+}
+
+#[async_trait]
+impl PlayerBackend for ScriptedPlayer {
+    async fn open(
+        &self,
+        request: OpenRequest,
+    ) -> Result<(SessionHandle, mpsc::Receiver<PlayerEvent>), PlayerError> {
+        let start = request.first.start_secs.unwrap_or(0.0);
+        self.opened.lock().unwrap().push(request);
+        let (events, receiver) = mpsc::channel(32);
+        for event in [
+            PlayerEvent::Started { index: 0 },
+            PlayerEvent::Position {
+                position: start,
+                duration: Some(4.0),
+                paused: false,
+            },
+        ] {
+            events.send(event).await.unwrap();
+        }
+        let session = ScriptedSession {
+            events,
+            toggles: Mutex::new(0),
+        };
+        Ok((Arc::new(session), receiver))
+    }
+}
+
+#[async_trait]
+impl PlayerSession for ScriptedSession {
+    async fn append(&self, _item: PlayItem) -> Result<(), PlayerError> {
+        Ok(())
+    }
+
+    async fn command(&self, command: PlayerCommand) -> Result<(), PlayerError> {
+        let script = match command {
+            PlayerCommand::TogglePause => {
+                let toggles = {
+                    let mut count = self.toggles.lock().unwrap();
+                    *count += 1;
+                    *count
+                };
+                if toggles == 1 {
+                    vec![PlayerEvent::Paused(true)]
+                } else {
+                    vec![
+                        PlayerEvent::Paused(false),
+                        PlayerEvent::Position {
+                            position: 4.0,
+                            duration: Some(4.0),
+                            paused: false,
+                        },
+                        PlayerEvent::Ended {
+                            index: 0,
+                            reason: EndReason::Eof,
+                        },
+                        PlayerEvent::Exited,
+                    ]
+                }
+            }
+            PlayerCommand::Stop => vec![
+                PlayerEvent::Ended {
+                    index: 0,
+                    reason: EndReason::Quit,
+                },
+                PlayerEvent::Exited,
+            ],
+            _ => Vec::new(),
+        };
+        for event in script {
+            self.events
+                .send(event)
+                .await
+                .map_err(|_| PlayerError::Disconnected)?;
+        }
+        Ok(())
+    }
 }
 
 fn series() -> LibraryItem {
@@ -262,27 +303,13 @@ fn saves(requests: &[Request]) -> Vec<Value> {
         .collect()
 }
 
-/// Prüft die Kommandozeilen aller Prozesse, die den Socket dieses Tests benutzen.
-fn cmdlines_mentioning(needle: &str) -> Vec<String> {
-    std::fs::read_dir("/proc")
-        .unwrap()
-        .flatten()
-        .filter_map(|entry| std::fs::read(entry.path().join("cmdline")).ok())
-        .map(|bytes| String::from_utf8_lossy(&bytes).replace('\0', " "))
-        .filter(|line| line.contains(needle))
-        .collect()
-}
-
 #[tokio::test(flavor = "multi_thread")]
 async fn playback_reports_to_jellyfin_and_syncs_to_anilist() {
-    if !have("mpv") || !have("ffmpeg") {
-        eprintln!("mpv or ffmpeg missing, skipping");
-        return;
-    }
     let dir = tempfile::tempdir().unwrap();
-    let jellyfin = mock_jellyfin(test_video(dir.path())).await;
+    let jellyfin = mock_jellyfin().await;
     let anilist = mock_anilist(json!([])).await;
-    let core = core(dir.path(), &anilist).await;
+    let player = Arc::new(ScriptedPlayer::default());
+    let core = core_with_player(dir.path(), &anilist, Some(player.clone())).await;
     let mut events = core.subscribe();
 
     core.login_jellyfin(&jellyfin.uri(), "eden", &SecretString::from("pw"))
@@ -308,13 +335,20 @@ async fn playback_reports_to_jellyfin_and_syncs_to_anilist() {
     );
     assert_eq!(state.item_id, "e1");
 
-    let socket_dir = core.paths().runtime_dir.display().to_string();
-    let lines = cmdlines_mentioning(&format!("--input-ipc-server={socket_dir}"));
-    assert!(!lines.is_empty(), "mpv process not found");
-    for line in &lines {
+    {
+        let opened = player.opened.lock().unwrap();
+        let request = &opened[0];
+        assert_eq!(request.first.start_secs, Some(1.0), "resume position");
         assert!(
-            !line.contains(JELLYFIN_TOKEN),
-            "token leaked into argv: {line}"
+            request
+                .http_headers
+                .iter()
+                .any(|h| h.expose_secret().contains(JELLYFIN_TOKEN)),
+            "stream requests carry the Jellyfin login"
+        );
+        assert!(
+            !request.first.url.expose_secret().contains(JELLYFIN_TOKEN),
+            "the token stays out of the stream URL"
         );
     }
 
@@ -339,19 +373,6 @@ async fn playback_reports_to_jellyfin_and_syncs_to_anilist() {
     assert!(count("/Sessions/Playing/Progress") >= 1);
     assert_eq!(count("/Sessions/Playing/Stopped"), 1);
 
-    let stream = requests
-        .iter()
-        .find(|r| r.url.path() == "/Videos/e1/stream")
-        .unwrap();
-    assert_eq!(
-        stream
-            .headers
-            .get("authorization")
-            .unwrap()
-            .to_str()
-            .unwrap(),
-        format!("MediaBrowser Token=\"{JELLYFIN_TOKEN}\"")
-    );
     let started = requests
         .iter()
         .find(|r| r.url.path() == "/Sessions/Playing")
@@ -386,6 +407,26 @@ async fn playback_reports_to_jellyfin_and_syncs_to_anilist() {
         (900, 1),
         "placeholder must be replaced"
     );
+}
+
+#[tokio::test]
+async fn without_a_player_playback_fails_with_a_hint() {
+    let dir = tempfile::tempdir().unwrap();
+    let jellyfin = mock_jellyfin().await;
+    let anilist = mock_anilist(json!([])).await;
+    let core = core(dir.path(), &anilist).await;
+    core.login_jellyfin(&jellyfin.uri(), "eden", &SecretString::from("pw"))
+        .await
+        .unwrap();
+
+    let error = core.play(&series(), None).await.unwrap_err();
+
+    assert!(
+        matches!(error, CoreError::Player(PlayerError::Unavailable(_))),
+        "{error}"
+    );
+    assert!(error.to_string().contains("GStreamer"), "{error}");
+    assert!(!core.is_playing());
 }
 
 #[tokio::test(flavor = "multi_thread")]

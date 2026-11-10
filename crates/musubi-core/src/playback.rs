@@ -40,7 +40,7 @@ struct Run {
     session: SessionHandle,
     item: LibraryItem,
     queue: Vec<QueueEntry>,
-    /// Bereits an mpv übergebene Ziele, Index entspricht der Warteschlange.
+    /// Bereits an den Player übergebene Ziele, Index entspricht der Warteschlange.
     targets: Vec<PlaybackTarget>,
     current: Option<CurrentFile>,
     threshold: f64,
@@ -273,6 +273,8 @@ impl Core {
 
     /// Spielt einen Titel ab. Ohne `episode_id` startet die erste ungesehene Episode.
     pub async fn play(&self, item: &LibraryItem, episode_id: Option<&str>) -> Result<()> {
+        // Ohne Player gar nicht erst bei Jellyfin anfragen.
+        let player = self.inner.player_backend()?;
         let jellyfin = self.require_jellyfin()?;
         let config = self.inner.config();
         let queue = self
@@ -295,7 +297,7 @@ impl Core {
             http_headers: jellyfin.client.stream_auth_header().into_iter().collect(),
             first: play_item(first, &target),
         };
-        let (session, events) = self.inner.player_backend().open(request).await?;
+        let (session, events) = player.open(request).await?;
 
         let generation = {
             let mut counter = self

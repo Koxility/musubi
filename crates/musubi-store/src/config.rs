@@ -87,34 +87,14 @@ impl Default for SyncConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PlayerConfig {
-    pub mpv_path: String,
-    /// Wert für `--hwdec`. Leer lässt die Einstellung aus der eigenen `mpv.conf` gelten.
-    pub hwdec: String,
-    pub extra_args: Vec<String>,
     /// Folgeepisoden automatisch einreihen.
     pub autoplay_next: bool,
-    pub backend: PlayerKind,
-}
-
-/// Wo Videos laufen.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum PlayerKind {
-    /// Im Fenster der App.
-    #[default]
-    Embedded,
-    /// Im eigenen Fenster von mpv.
-    Mpv,
 }
 
 impl Default for PlayerConfig {
     fn default() -> Self {
         Self {
-            mpv_path: "mpv".to_owned(),
-            hwdec: "auto-safe".to_owned(),
-            extra_args: Vec::new(),
             autoplay_next: true,
-            backend: PlayerKind::default(),
         }
     }
 }
@@ -173,7 +153,19 @@ mod tests {
         let config = Config::load(&path).unwrap();
         assert!(!config.sync.auto_sync);
         assert_eq!(config.sync.watched_threshold, 0.85);
-        assert_eq!(config.player.mpv_path, "mpv");
+        assert!(config.player.autoplay_next);
+    }
+
+    #[test]
+    fn settings_of_the_removed_mpv_player_are_ignored() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "[player]\nbackend = \"mpv\"\nmpv_path = \"mpv\"\nhwdec = \"auto-safe\"\nextra_args = []\nautoplay_next = false\n",
+        )
+        .unwrap();
+        assert!(!Config::load(&path).unwrap().player.autoplay_next);
     }
 
     #[test]
