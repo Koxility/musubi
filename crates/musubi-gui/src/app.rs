@@ -8,14 +8,12 @@ use iced::widget::image::Handle;
 use iced::widget::{button, column, container, row, stack, text};
 use iced::{Center, Color, Element, Fill, Subscription, Task, Theme};
 use musubi_core::domain::MediaKind;
-use musubi_core::{
-    AuthStatus, Config, Core, CoreEvent, PlaybackState, PlayerCommand, PlayerKind, Service,
-};
+use musubi_core::{AuthStatus, Config, Core, CoreEvent, PlayerCommand, Service};
 use tokio::sync::broadcast;
 
 use crate::images::{ImageCache, ImageKey};
 use crate::ui;
-use crate::{anilist, home, library, mapping, player, settings, setup, sync, theme, video};
+use crate::{anilist, home, library, mapping, settings, setup, sync, theme, video};
 
 const TOAST_SECONDS: u64 = 5;
 /// Version und Git-Stand dieses Builds, gesetzt von `build.rs`.
@@ -78,8 +76,6 @@ pub enum Message {
     Setup(setup::Msg),
     Video(video::Msg),
     Player(PlayerCommand),
-    SeekPreview(f64),
-    SeekCommit,
 }
 
 pub struct App {
@@ -97,8 +93,6 @@ pub struct App {
     pub setup: Option<setup::State>,
     pub video: video::State,
     video_link: Option<video::VideoLink>,
-    pub playback: Option<PlaybackState>,
-    pub seek_preview: Option<f64>,
     pub now: i64,
     /// Zählt Seitenwechsel. Asynchrone Ergebnisse von vorher dürfen die Ansicht nicht mehr
     /// umstellen, und die Seite bekommt bei jedem Wechsel frischen Widget-Zustand.
@@ -214,8 +208,6 @@ impl App {
             mapping: mapping::State::default(),
             sync: sync::State::default(),
             settings: settings::State::new(&config),
-            playback: None,
-            seek_preview: None,
             now: unix_now(),
             nav_generation: 0,
             view_epoch: 0,
@@ -225,8 +217,11 @@ impl App {
             config,
             core,
         };
-        if video.is_none() && app.config.player.backend == PlayerKind::Embedded {
-            app.toast("GStreamer is not available, videos open in mpv", false);
+        if video.is_none() {
+            app.toast(
+                "GStreamer is not available, video playback is disabled. See the README.",
+                false,
+            );
         }
         if let Err(error) = app.core.warn_if_expiring() {
             tracing::warn!(%error, "could not check the token expiry");
@@ -287,12 +282,9 @@ impl App {
 
     fn on_core_event(&mut self, event: CoreEvent) -> Task<Message> {
         match event {
-            CoreEvent::Playback(state) => self.playback = Some(state),
-            CoreEvent::PlaybackEnded => {
-                self.playback = None;
-                self.seek_preview = None;
-                return home::load(self);
-            }
+            // Der Player zeichnet Position und Pause selbst.
+            CoreEvent::Playback(_) => {}
+            CoreEvent::PlaybackEnded => return home::load(self),
             CoreEvent::LibraryChanged => {
                 return Task::batch([home::load(self), library::reload_view(self)]);
             }
@@ -408,12 +400,6 @@ impl App {
                     Message::Notify,
                 );
             }
-            Message::SeekPreview(position) => self.seek_preview = Some(position),
-            Message::SeekCommit => {
-                if let Some(position) = self.seek_preview.take() {
-                    return self.update(Message::Player(PlayerCommand::SeekAbsolute(position)));
-                }
-            }
         }
         Task::none()
     }
@@ -523,10 +509,9 @@ impl App {
                 None => player,
             };
         }
-        let content = column![self.page_view(), player::view(self)];
         let shell: Element<'_, Message> = row![
             self.navigation(),
-            container(content).width(Fill).height(Fill)
+            container(self.page_view()).width(Fill).height(Fill)
         ]
         .align_y(Center)
         .into();

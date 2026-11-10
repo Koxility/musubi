@@ -1,11 +1,7 @@
-//! Player-Abstraktion und mpv-Backend über JSON-IPC.
+//! Player-Abstraktion: Wiedergabeliste, Befehle und Ereignisse.
 //!
-//! mpv läuft als eigener Prozess. Das liefert Hardware-Decoding, Untertitel-Rendering und
-//! Wayland-/X11-Unterstützung ohne FFI, und ein Player-Absturz betrifft die App nicht.
-
-mod mpv;
-
-pub use mpv::{MpvBackend, MpvOptions};
+//! Der Kern spricht nur mit [`PlayerBackend`]. Die GUI liefert die Umsetzung, die Videos über
+//! GStreamer im App-Fenster abspielt.
 
 use std::sync::Arc;
 
@@ -16,20 +12,11 @@ use tokio::sync::mpsc;
 
 #[derive(Debug, Error)]
 pub enum PlayerError {
-    #[error("could not start mpv (`{path}`): {source}")]
-    Spawn {
-        path: String,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("mpv did not open its control socket in time")]
-    ConnectTimeout,
-    #[error("connection to mpv was lost")]
+    /// Kein Player verfügbar, etwa weil GStreamer-Plugins fehlen.
+    #[error("{0}")]
+    Unavailable(String),
+    #[error("connection to the player was lost")]
     Disconnected,
-    #[error("mpv rejected the command: {0}")]
-    Command(String),
-    #[error("mpv I/O error: {0}")]
-    Io(#[from] std::io::Error),
 }
 
 pub type Result<T> = std::result::Result<T, PlayerError>;
@@ -52,7 +39,7 @@ pub struct PlayItem {
 
 #[derive(Debug, Clone)]
 pub struct OpenRequest {
-    /// HTTP-Header für alle Streams. Werden per IPC übergeben, nie als Prozess-Argument.
+    /// HTTP-Header für alle Streams, z. B. die Jellyfin-Anmeldung.
     pub http_headers: Vec<SecretString>,
     pub first: PlayItem,
 }
@@ -94,7 +81,7 @@ pub enum PlayerEvent {
         index: usize,
         reason: EndReason,
     },
-    /// Der Player-Prozess ist beendet.
+    /// Die Wiedergabe ist beendet und der Player geschlossen.
     Exited,
 }
 
@@ -107,7 +94,7 @@ pub trait PlayerSession: Send + Sync {
 
 pub type SessionHandle = Arc<dyn PlayerSession>;
 
-/// Austauschpunkt für Player, derzeit mpv und der eingebettete Player der GUI.
+/// Austauschpunkt für Player, derzeit der eingebettete Player der GUI.
 #[async_trait]
 pub trait PlayerBackend: Send + Sync {
     async fn open(

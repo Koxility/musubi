@@ -185,7 +185,7 @@ impl Client {
         &self.base
     }
 
-    /// Header für mpv. Bewusst ohne Komma, damit mpv ihn nicht als Liste auftrennt.
+    /// Anmelde-Header für Streams im Format `Name: Wert`, den der Player jeder Anfrage mitgibt.
     pub fn stream_auth_header(&self) -> Option<SecretString> {
         self.token.as_ref().map(|t| {
             SecretString::from(format!(
@@ -537,8 +537,9 @@ impl Client {
 
     // Wiedergabe -------------------------------------------------------------------------
 
-    /// Fragt den Server, wie das Item abgespielt werden soll. mpv kann praktisch jedes Format,
-    /// das Geräteprofil erlaubt deshalb alles und Transcoding bleibt reiner Fallback.
+    /// Fragt den Server, wie das Item abgespielt werden soll. GStreamer mit `gst-libav` spielt
+    /// praktisch jedes Format, das Geräteprofil erlaubt deshalb alles und Transcoding bleibt
+    /// reiner Fallback.
     pub async fn playback_target(
         &self,
         user_id: &str,
@@ -546,7 +547,7 @@ impl Client {
         max_bitrate: Option<u64>,
     ) -> Result<PlaybackTarget> {
         let mut profile = json!({
-            "Name": "Musubi (mpv)",
+            "Name": "Musubi",
             "DirectPlayProfiles": [{ "Type": "Video" }, { "Type": "Audio" }],
             "TranscodingProfiles": [{
                 "Type": "Video",

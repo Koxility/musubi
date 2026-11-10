@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 
 use musubi_domain::{ListEntry, MediaKind, Viewer};
-use musubi_player::{MpvBackend, MpvOptions, PlayerBackend, SessionHandle};
-use musubi_store::{Config, Db, Paths, PlayerKind, SecretKey, SecretStore, open_secret_store};
+use musubi_player::{PlayerBackend, PlayerError, SessionHandle};
+use musubi_store::{Config, Db, Paths, SecretKey, SecretStore, open_secret_store};
 use tokio::sync::{Notify, broadcast};
 
 use crate::{CoreEvent, Result};
@@ -48,7 +48,8 @@ pub(crate) struct Inner {
     pub lists: RwLock<HashMap<MediaKind, Vec<ListEntry>>>,
     pub events: broadcast::Sender<CoreEvent>,
     pub outbox_wake: Notify,
-    pub player_override: Option<Arc<dyn PlayerBackend>>,
+    /// Der Player der GUI. Fehlt er, etwa ohne GStreamer, gibt es keine Wiedergabe.
+    pub player: Option<Arc<dyn PlayerBackend>>,
     pub active: Mutex<Option<ActivePlayback>>,
     pub generation: Mutex<u64>,
     pub anilist_endpoint: Option<String>,
@@ -135,19 +136,15 @@ impl Inner {
             .cloned()
     }
 
-    pub fn player_backend(&self) -> Arc<dyn PlayerBackend> {
-        let config = self.config().player;
-        if config.backend == PlayerKind::Embedded
-            && let Some(player) = &self.player_override
-        {
-            return Arc::clone(player);
-        }
-        Arc::new(MpvBackend::new(MpvOptions {
-            binary: config.mpv_path,
-            hwdec: config.hwdec,
-            extra_args: config.extra_args,
-            socket_dir: self.paths.runtime_dir.clone(),
-        }))
+    pub fn player_backend(&self) -> Result<Arc<dyn PlayerBackend>> {
+        self.player.clone().ok_or_else(|| {
+            PlayerError::Unavailable(
+                "Video playback is not available: install GStreamer with gst-plugins-base, \
+                 gst-plugins-good, gst-plugins-bad and gst-libav"
+                    .to_owned(),
+            )
+            .into()
+        })
     }
 
     pub fn identity(device_id: &str) -> musubi_jellyfin::Identity {
@@ -237,7 +234,7 @@ impl Core {
             lists: RwLock::new(HashMap::new()),
             events,
             outbox_wake: Notify::new(),
-            player_override: options.player,
+            player: options.player,
             active: Mutex::new(None),
             generation: Mutex::new(0),
             anilist_endpoint: options.anilist_endpoint,

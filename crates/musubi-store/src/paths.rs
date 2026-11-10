@@ -11,7 +11,6 @@ pub struct Paths {
     pub data_dir: PathBuf,
     pub cache_dir: PathBuf,
     pub state_dir: PathBuf,
-    pub runtime_dir: PathBuf,
 }
 
 impl Paths {
@@ -23,16 +22,11 @@ impl Paths {
             .state_dir()
             .map(Path::to_path_buf)
             .unwrap_or_else(|| dirs.data_local_dir().join("state"));
-        let runtime_dir = dirs
-            .runtime_dir()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| dirs.cache_dir().join("run"));
         let paths = Self {
             config_dir: dirs.config_dir().to_path_buf(),
             data_dir: dirs.data_dir().to_path_buf(),
             cache_dir: dirs.cache_dir().to_path_buf(),
             state_dir,
-            runtime_dir,
         };
         paths.ensure()?;
         Ok(paths)
@@ -45,14 +39,13 @@ impl Paths {
             data_dir: root.join("data"),
             cache_dir: root.join("cache"),
             state_dir: root.join("state"),
-            runtime_dir: root.join("run"),
         };
         paths.ensure()?;
         Ok(paths)
     }
 
     fn ensure(&self) -> std::io::Result<()> {
-        for dir in [&self.config_dir, &self.data_dir, &self.runtime_dir] {
+        for dir in [&self.config_dir, &self.data_dir] {
             std::fs::create_dir_all(dir)?;
             std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
         }

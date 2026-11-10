@@ -1,7 +1,7 @@
 //! Videowiedergabe im App-Fenster über GStreamer.
 //!
-//! [`EmbeddedPlayer`] erfüllt denselben Vertrag wie das mpv-Backend, damit Fortschritt, Gesehen-
-//! Schwelle und Sync im Kern unverändert laufen. GStreamer-Objekte leben auf dem UI-Thread, der
+//! [`EmbeddedPlayer`] erfüllt den Vertrag `PlayerBackend` des Kerns, Fortschritt, Gesehen-Schwelle
+//! und Sync laufen dort. GStreamer-Objekte leben auf dem UI-Thread, der
 //! Kern spricht über einen Kanal mit ihnen.
 
 use std::hash::{Hash, Hasher};

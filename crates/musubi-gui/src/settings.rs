@@ -2,8 +2,8 @@
 
 use iced::widget::{column, container, row, scrollable, slider, text, toggler};
 use iced::{Center, Element, Fill, Task};
+use musubi_core::Config;
 use musubi_core::oauth;
-use musubi_core::{Config, PlayerKind};
 
 use crate::app::{App, Message};
 use crate::{setup, theme, ui};
@@ -19,10 +19,7 @@ pub struct State {
     redirect: String,
     auto_sync: bool,
     threshold: f64,
-    mpv_path: String,
-    hwdec: String,
     autoplay: bool,
-    embedded: bool,
 }
 
 impl State {
@@ -42,23 +39,13 @@ impl State {
         self.redirect = oauth::loopback_redirect(config.anilist.loopback_port);
         self.auto_sync = config.sync.auto_sync;
         self.threshold = config.sync.watched_threshold * 100.0;
-        self.mpv_path.clone_from(&config.player.mpv_path);
-        self.hwdec.clone_from(&config.player.hwdec);
         self.autoplay = config.player.autoplay_next;
-        self.embedded = config.player.backend == PlayerKind::Embedded;
     }
 
     fn apply(&self, config: &mut Config) {
         config.sync.auto_sync = self.auto_sync;
         config.sync.watched_threshold = self.threshold / 100.0;
-        config.player.mpv_path = self.mpv_path.trim().to_owned();
-        config.player.hwdec = self.hwdec.trim().to_owned();
         config.player.autoplay_next = self.autoplay;
-        config.player.backend = if self.embedded {
-            PlayerKind::Embedded
-        } else {
-            PlayerKind::Mpv
-        };
         let client_id = self.client_id.trim().to_owned();
         config.anilist.client_id = (!client_id.is_empty()).then_some(client_id);
     }
@@ -74,10 +61,7 @@ pub enum Edit {
     Token(String),
     AutoSync(bool),
     Threshold(f64),
-    MpvPath(String),
-    Hwdec(String),
     Autoplay(bool),
-    Embedded(bool),
 }
 
 #[derive(Debug, Clone)]
@@ -111,10 +95,7 @@ pub fn update(app: &mut App, msg: Msg) -> Task<Message> {
                 Edit::Token(v) => s.token = v,
                 Edit::AutoSync(v) => s.auto_sync = v,
                 Edit::Threshold(v) => s.threshold = v,
-                Edit::MpvPath(v) => s.mpv_path = v,
-                Edit::Hwdec(v) => s.hwdec = v,
                 Edit::Autoplay(v) => s.autoplay = v,
-                Edit::Embedded(v) => s.embedded = v,
             }
         }
         Msg::LoginJellyfin => {
@@ -246,16 +227,6 @@ pub fn view(app: &App) -> Element<'_, Message> {
             slider(50.0..=100.0, s.threshold, |v| Msg::Edit(Edit::Threshold(v))).step(1.0),
         ]
         .spacing(4),
-        toggler(s.embedded)
-            .label("Play videos inside Musubi (off: external mpv window)")
-            .text_size(14)
-            .on_toggle(|v| Msg::Edit(Edit::Embedded(v))),
-        ui::field("mpv binary", &s.mpv_path, edit(Edit::MpvPath)),
-        ui::field(
-            "Hardware decoding (--hwdec, empty = mpv.conf)",
-            &s.hwdec,
-            edit(Edit::Hwdec)
-        ),
         toggler(s.autoplay)
             .label("Play next episode automatically")
             .text_size(14)

@@ -288,14 +288,6 @@ pub fn primary_pill(theme: &Theme, status: button::Status) -> button::Style {
     }
 }
 
-/// Runder Button in der Akzentfarbe, z. B. Wiedergabe in der mpv-Leiste.
-pub fn primary_round(theme: &Theme, status: button::Status) -> button::Style {
-    button::Style {
-        border: rounded(999.0),
-        ..primary(theme, status)
-    }
-}
-
 /// Icon-Button auf normalem Hintergrund, z. B. auf der Detailseite.
 pub fn ghost_button(_: &Theme, status: button::Status) -> button::Style {
     button::Style {
@@ -359,19 +351,6 @@ pub fn tooltip(_: &Theme) -> container::Style {
             color: Color::from_rgba(0.0, 0.0, 0.0, 0.4),
             offset: iced::Vector::new(0.0, 2.0),
             blur_radius: 8.0,
-        },
-        ..container::Style::default()
-    }
-}
-
-/// Leiste der externen mpv-Wiedergabe.
-pub fn now_playing(_: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Color::from_rgb8(0x0f, 0x19, 0x26).into()),
-        border: Border {
-            color: white(0.06),
-            width: 1.0,
-            radius: 0.0.into(),
         },
         ..container::Style::default()
     }

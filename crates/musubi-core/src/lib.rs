@@ -24,8 +24,11 @@ pub use sync_ops::SyncReport;
 
 pub use musubi_anilist::oauth;
 pub use musubi_domain as domain;
-pub use musubi_player::{PlayerBackend, PlayerCommand};
+pub use musubi_player::{
+    EndReason, OpenRequest, PlayItem, PlayerBackend, PlayerCommand, PlayerError, PlayerEvent,
+    PlayerSession, SessionHandle,
+};
 pub use musubi_store::{
-    AniListLoginFlow, Config, OutboxItem, OutboxOp, Paths, PlayerKind, ReviewCandidate, ReviewItem,
+    AniListLoginFlow, Config, OutboxItem, OutboxOp, Paths, ReviewCandidate, ReviewItem,
     SyncLogEntry,
 };

@@ -10,7 +10,6 @@ mod icons;
 mod images;
 mod library;
 mod mapping;
-mod player;
 mod settings;
 mod setup;
 mod sync;
