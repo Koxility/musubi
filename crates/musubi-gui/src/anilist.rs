@@ -712,7 +712,7 @@ fn status_filter<'a>(state: &State, kind: MediaKind) -> Element<'a, Msg> {
         button(text(label).size(14))
             .width(Fill)
             .padding([7, 12])
-            .style(theme::nav_button(active))
+            .style(theme::tab(active))
             .on_press(Msg::StatusFilter(value))
             .into()
     };
@@ -785,7 +785,7 @@ fn tabs(state: &State) -> Element<'_, Msg> {
     let tab = |label: &'static str, value: Tab| {
         button(text(label).size(15))
             .padding([8, 16])
-            .style(theme::nav_button(state.tab == value))
+            .style(theme::tab(state.tab == value))
             .on_press(Msg::Tab(value))
     };
     row![

@@ -5,19 +5,24 @@ use std::time::{Duration, Instant};
 
 use iced::keyboard::{self, Key, key::Named};
 use iced::widget::image::Handle;
-use iced::widget::{button, column, container, row, stack, text};
+use iced::widget::{Space, button, column, container, row, stack, svg, text};
 use iced::{Center, Color, Element, Fill, Subscription, Task, Theme};
 use musubi_core::domain::MediaKind;
 use musubi_core::{AuthStatus, Config, Core, CoreEvent, PlayerCommand, Service};
 use tokio::sync::broadcast;
 
+use crate::icons::Icon;
 use crate::images::{ImageCache, ImageKey};
 use crate::ui;
-use crate::{anilist, home, library, mapping, settings, setup, sync, theme, video};
+use crate::{anilist, home, library, mapping, profile, settings, setup, sync, theme, video};
 
 const TOAST_SECONDS: u64 = 5;
-/// Version und Git-Stand dieses Builds, gesetzt von `build.rs`.
-const BUILD: &str = concat!("v", env!("CARGO_PKG_VERSION"), " · ", env!("MUSUBI_COMMIT"));
+/// Version dieses Builds.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// Git-Stand dieses Builds, gesetzt von `build.rs`.
+pub const COMMIT: &str = env!("MUSUBI_COMMIT");
+/// Breite der Seitenleiste.
+const RAIL_WIDTH: f32 = 216.0;
 const SEEK_STEP: f64 = 10.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,19 +33,41 @@ pub enum Page {
     Mapping,
     Sync,
     Settings,
+    Profile,
 }
 
-const NAVIGATION: [(Page, &str); 6] = [
+/// Reihenfolge der Tastenkürzel Ctrl+1 bis Ctrl+7.
+const NAVIGATION: [(Page, &str); 7] = [
     (Page::Home, "Home"),
     (Page::Library, "Library"),
     (Page::AniList, "AniList"),
     (Page::Mapping, "Mapping"),
     (Page::Sync, "Sync"),
     (Page::Settings, "Settings"),
+    (Page::Profile, "Profile"),
+];
+
+/// Die Seitenleiste in drei Gruppen, jede mit ihrer Kordelfarbe.
+const RAIL: [(&str, Color, &[(Page, Icon)]); 3] = [
+    (
+        "Watch",
+        theme::WATCH,
+        &[(Page::Home, Icon::Home), (Page::Library, Icon::Library)],
+    ),
+    (
+        "Track",
+        theme::TRACK,
+        &[(Page::AniList, Icon::List), (Page::Profile, Icon::Profile)],
+    ),
+    (
+        "Connect",
+        theme::PAPER,
+        &[(Page::Mapping, Icon::Link), (Page::Sync, Icon::Sync)],
+    ),
 ];
 
 const SHORTCUTS: [(&str, &str); 11] = [
-    ("Ctrl+1 to 6", "Switch page"),
+    ("Ctrl+1 to 7", "Switch page"),
     ("Ctrl+R", "Refresh"),
     (
         "Space, Left / Right, F, M",
@@ -73,6 +100,7 @@ pub enum Message {
     Mapping(mapping::Msg),
     Sync(sync::Msg),
     Settings(settings::Msg),
+    Profile(profile::Msg),
     Setup(setup::Msg),
     Video(video::Msg),
     Player(PlayerCommand),
@@ -90,6 +118,7 @@ pub struct App {
     pub mapping: mapping::State,
     pub sync: sync::State,
     pub settings: settings::State,
+    pub profile: profile::State,
     pub setup: Option<setup::State>,
     pub video: video::State,
     video_link: Option<video::VideoLink>,
@@ -208,6 +237,7 @@ impl App {
             mapping: mapping::State::default(),
             sync: sync::State::default(),
             settings: settings::State::new(&config),
+            profile: profile::State::default(),
             now: unix_now(),
             nav_generation: 0,
             view_epoch: 0,
@@ -338,6 +368,7 @@ impl App {
             Page::Library => library::load(self),
             Page::Mapping => mapping::load(self),
             Page::Sync => sync::load(self),
+            Page::Profile => profile::load(self),
             Page::AniList | Page::Settings => Task::none(),
         }
     }
@@ -366,7 +397,14 @@ impl App {
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Navigate(page) => return self.navigate(page),
-            Message::Refresh => return self.load_everything(),
+            Message::Refresh => {
+                let profile = if self.page == Page::Profile {
+                    profile::load(self)
+                } else {
+                    Task::none()
+                };
+                return Task::batch([self.load_everything(), profile]);
+            }
             Message::Tick => {
                 self.now = unix_now();
                 if self
@@ -391,6 +429,7 @@ impl App {
             Message::Mapping(msg) => return mapping::update(self, msg),
             Message::Sync(msg) => return sync::update(self, msg),
             Message::Settings(msg) => return settings::update(self, msg),
+            Message::Profile(msg) => return profile::update(self, msg),
             Message::Setup(msg) => return setup::update(self, msg),
             Message::Video(msg) => return video::update(self, msg),
             Message::Player(command) => {
@@ -404,39 +443,162 @@ impl App {
         Task::none()
     }
 
-    fn navigation(&self) -> Element<'_, Message> {
-        let items = NAVIGATION.iter().map(|(page, label)| {
-            button(text(*label).size(15))
-                .width(Fill)
-                .padding([10, 14])
-                .style(theme::nav_button(self.page == *page))
-                .on_press(Message::Navigate(*page))
-                .into()
-        });
-        container(
-            column![
-                container(text("Musubi").size(22).color(theme::ACCENT)).padding([8, 14]),
-                column(items).spacing(4),
-                match self.mapping.progress() {
-                    Some((done, total)) => {
-                        container(ui::muted(format!("Matching {done} / {total}"))).padding([0, 14])
-                    }
-                    None => container(iced::widget::Space::new()),
-                },
-                iced::widget::Space::new().height(Fill),
-                // Zeigt, welcher Build läuft, z. B. ob der Starter noch eine alte Binary öffnet.
-                container(text(BUILD).size(11).color(Color {
-                    a: 0.6,
-                    ..theme::MUTED
-                }))
-                .padding([0, 14]),
+    fn label(page: Page) -> &'static str {
+        NAVIGATION
+            .iter()
+            .find(|(p, _)| *p == page)
+            .map_or("", |(_, label)| label)
+    }
+
+    fn nav_item(&self, page: Page, glyph: Icon, cord: Color) -> Element<'_, Message> {
+        let active = self.page == page;
+        let tint = if active { cord } else { theme::MUTED };
+        // Der schmale Streifen links zeigt die aktive Seite in der Farbe ihrer Gruppe.
+        let marker = container(Space::new())
+            .width(3)
+            .height(18)
+            .style(theme::solid(
+                if active { cord } else { Color::TRANSPARENT },
+                2.0,
+            ));
+        button(
+            row![
+                marker,
+                ui::icon(glyph, 18.0, tint),
+                text(Self::label(page)).size(theme::T_BODY).font(if active {
+                    theme::SEMIBOLD
+                } else {
+                    theme::MEDIUM
+                }),
             ]
-            .spacing(18),
+            .spacing(theme::S3)
+            .align_y(Center),
         )
-        .padding(12)
-        .width(190)
+        .width(Fill)
+        .padding(iced::Padding {
+            top: 9.0,
+            right: theme::S3,
+            bottom: 9.0,
+            left: 0.0,
+        })
+        .style(theme::nav_button(active, cord))
+        .on_press(Message::Navigate(page))
+        .into()
+    }
+
+    fn account_line<'a>(
+        service: &'a str,
+        user: Option<&'a str>,
+        cord: Color,
+    ) -> Element<'a, Message> {
+        row![
+            container(Space::new())
+                .width(6)
+                .height(6)
+                .style(theme::solid(
+                    if user.is_some() { cord } else { theme::FAINT },
+                    3.0,
+                )),
+            text(ui::ellipsize(user.unwrap_or(service), 22))
+                .size(theme::T_LABEL)
+                .color(if user.is_some() {
+                    theme::MUTED
+                } else {
+                    theme::FAINT
+                }),
+        ]
+        .spacing(theme::S2)
+        .align_y(Center)
+        .into()
+    }
+
+    fn navigation(&self) -> Element<'_, Message> {
+        static MARK: std::sync::LazyLock<svg::Handle> = std::sync::LazyLock::new(|| {
+            svg::Handle::from_memory(include_bytes!("../assets/mark.svg").as_slice())
+        });
+        let brand = row![
+            svg(MARK.clone()).width(41).height(22),
+            text("Musubi")
+                .size(theme::T_TITLE)
+                .font(theme::DISPLAY_BOLD)
+                .color(theme::PAPER),
+        ]
+        .spacing(theme::S3)
+        .align_y(Center);
+        let mut groups = column![].spacing(theme::S5);
+        for (name, cord, pages) in RAIL {
+            let items = pages
+                .iter()
+                .map(|(page, glyph)| self.nav_item(*page, *glyph, cord));
+            groups = groups.push(
+                column![
+                    container(
+                        text(name)
+                            .size(theme::T_CAPTION)
+                            .font(theme::SEMIBOLD)
+                            .color(theme::FAINT)
+                    )
+                    .padding(iced::padding::left(theme::S4 - 1.0)),
+                    column(items).spacing(2),
+                ]
+                .spacing(theme::S2),
+            );
+        }
+        let matching: Element<'_, Message> = match self.mapping.progress() {
+            Some((done, total)) => container(
+                column![
+                    ui::muted(format!("Matching {done} of {total}")),
+                    ui::bar(done as f32 / total.max(1) as f32, theme::TRACK, 3.0),
+                ]
+                .spacing(6),
+            )
+            .padding([0.0, theme::S4])
+            .into(),
+            None => Space::new().into(),
+        };
+        let footer = column![
+            Self::account_line("Jellyfin", self.auth.jellyfin_user.as_deref(), theme::WATCH),
+            Self::account_line("AniList", self.auth.anilist_user.as_deref(), theme::TRACK),
+            // Zeigt, welcher Build läuft, z. B. ob der Starter noch eine alte Binary öffnet.
+            text(format!("v{VERSION} · {COMMIT}"))
+                .size(theme::T_CAPTION)
+                .color(theme::FAINT),
+        ]
+        .spacing(6)
+        .padding([0.0, theme::S4]);
+        let rail = container(
+            column![
+                container(brand).padding(iced::Padding {
+                    top: theme::S2,
+                    right: 0.0,
+                    bottom: theme::S3,
+                    left: theme::S4 - 1.0,
+                }),
+                groups,
+                Space::new().height(Fill),
+                matching,
+                self.nav_item(Page::Settings, Icon::Settings, theme::PAPER),
+                ui::divider(),
+                footer,
+            ]
+            .spacing(theme::S4),
+        )
+        .padding(iced::Padding {
+            top: theme::S4,
+            right: theme::S2,
+            bottom: theme::S4,
+            left: theme::S2,
+        })
+        .width(RAIL_WIDTH)
         .height(Fill)
-        .style(theme::rail)
+        .style(theme::rail);
+        row![
+            rail,
+            container(Space::new())
+                .width(1)
+                .height(Fill)
+                .style(theme::line)
+        ]
         .into()
     }
 
@@ -470,34 +632,35 @@ impl App {
             Page::Mapping => mapping::view(self),
             Page::Sync => sync::view(self),
             Page::Settings => settings::view(self),
+            Page::Profile => profile::view(self),
         }
     }
 
     fn help_body(&self) -> Element<'_, Message> {
-        let rows = SHORTCUTS.iter().map(|(keys, action)| {
-            row![
-                text(*keys).size(14).width(170).color(theme::ACCENT),
-                text(*action).size(14),
-            ]
-            .into()
-        });
-        column(rows).spacing(8).into()
+        let rows = SHORTCUTS
+            .iter()
+            .map(|(keys, action)| {
+                row![
+                    text(*keys)
+                        .size(theme::T_SMALL)
+                        .font(theme::SEMIBOLD)
+                        .width(190)
+                        .color(theme::PAPER),
+                    text(*action).size(theme::T_SMALL).color(theme::MUTED),
+                ]
+                .padding([7, 0])
+                .into()
+            })
+            .collect();
+        ui::divided(rows).into()
     }
 
     fn toast_view(&self) -> Option<Element<'_, Message>> {
         let (message, ok, _) = self.toast.as_ref()?;
         Some(
-            iced::widget::bottom_right(
-                container(
-                    text(message)
-                        .size(14)
-                        .color(if *ok { theme::TEXT } else { theme::RED }),
-                )
-                .padding([10, 16])
-                .style(theme::surface),
-            )
-            .padding(iced::padding::bottom(84).right(20))
-            .into(),
+            iced::widget::bottom_right(ui::toast(message, *ok))
+                .padding(iced::padding::bottom(84).right(theme::S5))
+                .into(),
         )
     }
 
@@ -526,7 +689,7 @@ impl App {
                     self.help_body(),
                     ui::secondary("Close", Message::ToggleHelp)
                 ]
-                .spacing(16)
+                .spacing(theme::S4)
                 .into(),
             );
         }
@@ -693,6 +856,9 @@ mod tests {
         let two = press(Key::Character("2".into()), keyboard::Modifiers::CTRL);
         assert!(matches!(two, Some(Message::Navigate(Page::Library))));
         assert!(press(Key::Character("0".into()), keyboard::Modifiers::CTRL).is_none());
+        let seven = press(Key::Character("7".into()), keyboard::Modifiers::CTRL);
+        assert!(matches!(seven, Some(Message::Navigate(Page::Profile))));
+        assert!(press(Key::Character("8".into()), keyboard::Modifiers::CTRL).is_none());
         assert!(press(Key::Character("2".into()), keyboard::Modifiers::empty()).is_none());
     }
 }

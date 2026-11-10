@@ -610,7 +610,7 @@ fn season_tabs(detail: &Detail) -> Element<'_, Msg> {
         };
         button(text(label).size(14))
             .padding([8, 14])
-            .style(theme::nav_button(detail.season == Some(number)))
+            .style(theme::tab(detail.season == Some(number)))
             .on_press(Msg::Season(number))
             .into()
     });
