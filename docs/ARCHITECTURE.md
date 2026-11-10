@@ -13,13 +13,14 @@
           │             │              │             │
    musubi-jellyfin  musubi-anilist  musubi-player  musubi-store
     REST client     GraphQL, OAuth,  PlayerBackend  config, secrets,
-                    rate limiter     mpv IPC        SQLite
+                    rate limiter     commands,      SQLite
+                                     events
           └─────────────┴──────┬───────┴─────────────┘
                          musubi-domain
                      plain types, no I/O
 ```
 
-Dependencies only point downwards, and the crate boundaries let the compiler enforce that. The GUI depends only on the core and knows nothing about HTTP or mpv. The workspace sets `unsafe_code = "forbid"`.
+Dependencies only point downwards, and the crate boundaries let the compiler enforce that. The GUI depends only on the core and knows nothing about HTTP. The workspace sets `unsafe_code = "forbid"`.
 
 ### Core–GUI contract
 
@@ -37,16 +38,14 @@ The GUI is pure Rust without system toolkits like GTK and looks the same on ever
 - Iced has no virtualized grids, so the library builds widgets for every title.
 - Iced keeps widget state such as scroll position as long as the same widget type sits at the same place in the tree. On every view change (page switch, detail page opened or closed), the nesting depth of the page alternates so that the new view starts fresh. `keyed_column` is not an option here: in Iced 0.14 it diffs equally long child lists without a type check and panics when the page type changes.
 
-### Player: GStreamer in the window, mpv as an alternative
+### Player: GStreamer inside the window
 
-The default is `iced_video_player` on GStreamer.
+Videos play through `iced_video_player` on GStreamer.
 
 - The picture renders natively inside the Iced window, the controls sit on top, and the project needs no `unsafe` code of its own. `assrender` draws subtitles into the picture.
-- `EmbeddedPlayer` implements the same `PlayerBackend` trait as mpv, so progress tracking and sync in the core do not notice a difference.
+- `musubi-player` defines the `PlayerBackend` trait with commands and events. The GUI's `EmbeddedPlayer` implements it, so progress tracking and sync stay in the core and are tested there with a scripted player.
 - Streams open off the UI thread; afterwards the GStreamer objects live on the UI thread.
-- If plugins are missing, the app falls back to mpv.
-
-mpv runs as a separate process controlled over JSON IPC. Hardware decoding, ASS subtitles and Wayland/X11 support come for free, your `mpv.conf` keeps working, and a player crash cannot take the app down. The price is a separate window.
+- If GStreamer or a required plugin is missing, the app starts anyway. It shows a notice, and playing a title fails with a hint to install the plugins. Everything else, including AniList management, keeps working.
 
 ### Persistence: SQLite on its own thread
 
@@ -64,8 +63,8 @@ About a dozen operations do not justify a code generation step with a checked-in
 
 ### Playback
 
-1. `PlaybackInfo` returns a direct stream or a transcoding URL. The device profile allows everything, because GStreamer and mpv play almost any format.
-2. mpv starts without credentials. The auth header is set over IPC afterwards, so the token never appears in `argv` or `ps`.
+1. `PlaybackInfo` returns a direct stream or a transcoding URL. The device profile allows everything, because GStreamer with `gst-libav` plays almost any format.
+2. The Jellyfin token travels as an HTTP header set on the GStreamer source, never in the stream URL.
 3. Progress goes to Jellyfin every 10 s and on pause and seek. The next episode is queued while the current one plays, so next and previous work.
 4. Once the watched threshold (85 % by default) is reached, or at the end of the file, the sync rules apply.
 
@@ -128,12 +127,10 @@ The rate limiter starts at the measured limit of 30 requests per minute, adopts 
 - **Credentials.** By default they live in `credentials.toml` with mode 0600 in a 0700 directory, written atomically. More permissive modes abort startup. Secret Service can be chosen in the config.
 - **Passwords and tokens.** Passwords are never stored. Tokens are held as `SecretString` and never appear in logs.
 - **AniList login.** It uses the implicit grant, so no client secret is needed. The loopback server listens on 127.0.0.1 only, checks the Host header, and uses a random path per login. It accepts the token only after verifying it with `Viewer`.
-- **mpv socket.** It lives in a 0700 directory under `$XDG_RUNTIME_DIR`.
 
 ## Known limitations
 
 ### Playback
-- The built-in player ignores `mpv.conf`.
 - Of several external subtitle files, only the first is loaded. Embedded tracks are not affected.
 - A subtitle that starts at exactly 0 s may be missing at startup.
 - The server decides whether to transcode. There are no custom profiles, only `max_bitrate`.

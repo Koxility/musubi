@@ -2,7 +2,7 @@
 
 All notable changes to Musubi are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
-## [0.1.0] - 2026-11-09
+## [0.1.0] - 2026-11-10
 
 First release.
 
@@ -16,13 +16,12 @@ First release.
 - **Built-in player.**
   - Plays inside the app window via GStreamer, with hardware decoding and ASS subtitles.
   - Controls in the style of common streaming apps: icon buttons, skip ±10 s, previous and next episode, volume and mute, subtitle and audio track switching, fullscreen.
-  - mpv in its own window is available as an alternative.
 - **AniList management.**
   - Add, edit and delete entries for anime and manga: status, progress, score in your format, advanced scoring, notes, custom lists, dates and privacy.
   - Works without Jellyfin as well.
 - **Per-season matching.**
   - Every Jellyfin season gets its own AniList entry, found via provider IDs, sequels (also across movies and OVAs) and title search.
-  - Recaps and bonus episodes no longer shift later seasons.
+  - Recaps and bonus episodes do not shift later seasons.
   - Unsure matches are marked and only sync after you confirm them.
   - Any season can be changed on its own.
 - **Sync.**
@@ -34,6 +33,7 @@ First release.
 ### Notes
 
 - Linux only. Release archives are built for x86_64.
+- Playback needs GStreamer with `gst-plugins-base`, `-good`, `-bad` and `gst-libav`.
 - You need your own AniList client ID; see the README.
 
 [0.1.0]: https://github.com/Koxility/musubi/releases/tag/v0.1.0
