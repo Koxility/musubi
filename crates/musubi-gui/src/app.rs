@@ -658,7 +658,8 @@ impl App {
                     top: theme::S2,
                     right: 0.0,
                     bottom: theme::S3,
-                    left: theme::S4 - 1.0,
+                    // The menu button keeps its place when the rail hides.
+                    left: 0.0,
                 }),
                 groups,
                 Space::new().height(Fill),
@@ -689,7 +690,8 @@ impl App {
         } else {
             container(self.menu_button())
                 .padding(iced::Padding {
-                    top: theme::S4 + 3.0,
+                    // Where the button sits in the open rail: centred on the logo.
+                    top: theme::S4 + theme::S2 + 3.0,
                     right: theme::S2,
                     bottom: theme::S4,
                     left: theme::S2,
