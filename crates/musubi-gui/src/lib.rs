@@ -38,6 +38,8 @@ pub fn run(core: Core, video: Option<VideoLink>) -> anyhow::Result<()> {
     .window(iced::window::Settings {
         size: iced::Size::new(1360.0, 880.0),
         min_size: Some(iced::Size::new(960.0, 620.0)),
+        // Ohne lesbares Icon startet die App trotzdem.
+        icon: iced::window::icon::from_file_data(include_bytes!("../assets/icon.png"), None).ok(),
         platform_specific: iced::window::settings::PlatformSpecific {
             // Muss zu `StartupWMClass` in `packaging/musubi.desktop` passen.
             application_id: "io.github.musubi.Musubi".to_owned(),

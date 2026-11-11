@@ -41,7 +41,6 @@ pub const S3: f32 = 12.0;
 pub const S4: f32 = 16.0;
 pub const S5: f32 = 24.0;
 pub const S6: f32 = 32.0;
-pub const S7: f32 = 48.0;
 
 // Radien. Poster bleiben bewusst kantig, nur Bedienelemente des Players sind rund.
 pub const R_SM: f32 = 3.0;

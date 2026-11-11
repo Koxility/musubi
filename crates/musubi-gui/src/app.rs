@@ -47,8 +47,11 @@ const NAVIGATION: [(Page, &str); 7] = [
     (Page::Profile, "Profile"),
 ];
 
+/// Gruppe der Seitenleiste: Name, Kordelfarbe und ihre Seiten.
+type RailGroup = (&'static str, Color, &'static [(Page, Icon)]);
+
 /// Die Seitenleiste in drei Gruppen, jede mit ihrer Kordelfarbe.
-const RAIL: [(&str, Color, &[(Page, Icon)]); 3] = [
+const RAIL: [RailGroup; 3] = [
     (
         "Watch",
         theme::WATCH,

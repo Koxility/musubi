@@ -32,7 +32,7 @@ install -Dm644 packaging/musubi.desktop ~/.local/share/applications/musubi.deskt
 install -Dm644 packaging/musubi.svg ~/.local/share/icons/hicolor/scalable/apps/musubi.svg
 ```
 
-The bottom of the sidebar shows the version and git commit of the running build, e.g. `v0.1.0 · 218b921`. `crates/musubi-gui/build.rs` embeds the commit. If the commit doesn't match your checkout, your launcher starts an older binary.
+The bottom of the sidebar and of the Settings page show the version and git commit of the running build, e.g. `v0.1.0 · 218b921`. `crates/musubi-gui/build.rs` embeds the commit. If the commit doesn't match your checkout, your launcher starts an older binary.
 
 ## Checks
 
@@ -59,6 +59,12 @@ cargo run -p musubi-core --example demo_backend -- path/to/video.mkv
 ```
 
 Debug builds send AniList requests to `MUSUBI_DEV_ANILIST_ENDPOINT` when it is set; point it at the printed AniList URL. Release builds ignore the variable.
+
+The demo serves generated artwork, anime and manga lists and profile statistics, so every page has content. With `--login` it also logs the profile under the usual XDG paths in to both mock servers. Point `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME` and `XDG_STATE_HOME` at a scratch directory for both the demo and the app to try the GUI without touching your real profile:
+
+```bash
+cargo run -p musubi-core --example demo_backend -- --login
+```
 
 ## Code layout
 

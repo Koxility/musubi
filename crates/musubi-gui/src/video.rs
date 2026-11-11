@@ -697,7 +697,7 @@ fn control<'a>(icon: Icon, size: f32, message: Option<Msg>, label: &'a str) -> E
 
 /// Wie `control`, aber farbig hervorgehoben, solange die Funktion an ist.
 fn toggle<'a>(icon: Icon, on: bool, message: Msg, label: &'a str) -> Element<'a, Msg> {
-    let color = if on { theme::ACCENT } else { theme::ON_VIDEO };
+    let color = if on { theme::WATCH } else { theme::ON_VIDEO };
     ui::icon_button(icon, 22.0, color, Some(message), label, theme::icon_button)
 }
 
@@ -705,8 +705,8 @@ fn top_bar<'a>(title: &'a str) -> Element<'a, Msg> {
     let (series, episode) = ui::split_title(title);
     let mut heading = column![
         text(ui::ellipsize(series, 90))
-            .size(19)
-            .font(ui::SEMIBOLD)
+            .size(theme::T_TITLE)
+            .font(theme::DISPLAY)
             .color(theme::ON_VIDEO)
     ]
     .spacing(2);
@@ -793,7 +793,7 @@ fn bottom_bar<'a>(state: &'a State, session: &'a Session, video: &'a Video) -> E
     } else {
         (Icon::Pause, "Pause (Space)")
     };
-    let time = |seconds: f64| text(ui::format_time(seconds)).size(13);
+    let time = |seconds: f64| text(ui::format_time(seconds)).size(theme::T_SMALL);
     let seek = row![
         time(position).color(theme::ON_VIDEO),
         slider(0.0..=duration, position, Msg::SeekPreview)
@@ -879,7 +879,9 @@ fn loading<'a>() -> Element<'a, Msg> {
                     ..theme::ON_VIDEO
                 }
             ),
-            text("Loading").size(14).color(theme::ON_VIDEO_MUTED),
+            text("Loading")
+                .size(theme::T_SMALL)
+                .color(theme::ON_VIDEO_MUTED),
         ]
         .spacing(12)
         .align_x(Center),

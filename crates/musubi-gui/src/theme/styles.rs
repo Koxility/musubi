@@ -166,15 +166,6 @@ pub fn dim(_: &Theme) -> container::Style {
     }
 }
 
-/// Streifen über einem Bild, auf dem Text steht.
-pub fn caption_strip(_: &Theme) -> container::Style {
-    container::Style {
-        background: Some(alpha(Color::from_rgb8(0x05, 0x08, 0x10), 0.78).into()),
-        text_color: Some(PAPER),
-        ..container::Style::default()
-    }
-}
-
 fn vertical(stops: &[(f32, Color)]) -> container::Style {
     let mut linear = gradient::Linear::new(Radians(std::f32::consts::PI));
     for (offset, color) in stops {
@@ -561,21 +552,4 @@ pub fn form_slider(_: &Theme, _: slider::Status) -> slider::Style {
             border_color: Color::TRANSPARENT,
         },
     }
-}
-
-// Übergangsnamen, bis alle Seiten umgestellt sind -----------------------------------------
-
-pub const BG: Color = INK;
-pub const ACCENT: Color = TRACK;
-pub const TEXT: Color = PAPER;
-pub const GREEN: Color = OK;
-pub const ORANGE: Color = WARN;
-pub const RED: Color = BAD;
-
-pub fn primary(theme: &Theme, status: button::Status) -> button::Style {
-    track(theme, status)
-}
-
-pub fn primary_pill(theme: &Theme, status: button::Status) -> button::Style {
-    watch_pill(theme, status)
 }
