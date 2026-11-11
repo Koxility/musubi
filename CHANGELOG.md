@@ -4,6 +4,14 @@ All notable changes to Musubi are documented here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Added
+
+- **Several AniList entries per season, by hand.** The change dialog for a season lists each of its entries with its own *Edit…* and has *Add entry…* for another one. A title's page shows every entry of the selected season, not only the first.
+
+### Changed
+
+- **Smarter matching of long and split series.** One AniList entry now continues across as many Jellyfin seasons as it has episodes for, even when the metadata plugin wrote other IDs on those seasons, so a classic run split into many seasons maps to its single entry and the sequels follow after it. A season split over several AniList entries skips an episode 0 that Jellyfin keeps under Specials instead of counting every episode one too low. Automatic matches of multi-season series are re-planned once on the next start; manual ones stay.
+
 ## [0.3.0] - 2026-11-11
 
 ### Added

@@ -49,6 +49,8 @@ pub(crate) struct Inner {
     pub lists: RwLock<HashMap<MediaKind, Vec<ListEntry>>>,
     pub events: broadcast::Sender<CoreEvent>,
     pub outbox_wake: Notify,
+    /// Set while this core runs `match_all`, so a second run does not overlap it.
+    pub matching: std::sync::atomic::AtomicBool,
     /// Der Player der GUI. Fehlt er, etwa ohne GStreamer, gibt es keine Wiedergabe.
     pub player: Option<Arc<dyn PlayerBackend>>,
     pub active: Mutex<Option<ActivePlayback>>,
@@ -235,6 +237,7 @@ impl Core {
             lists: RwLock::new(HashMap::new()),
             events,
             outbox_wake: Notify::new(),
+            matching: std::sync::atomic::AtomicBool::new(false),
             player: options.player,
             active: Mutex::new(None),
             generation: Mutex::new(0),

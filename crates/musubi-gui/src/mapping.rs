@@ -23,7 +23,10 @@ pub struct MappingForm {
 impl MappingForm {
     pub fn new(mapping: &Mapping) -> Self {
         Self {
-            media: mapping.media_id.to_string(),
+            media: Some(mapping.media_id)
+                .filter(|id| *id != 0)
+                .map(|id| id.to_string())
+                .unwrap_or_default(),
             season: mapping.season.to_string(),
             start: mapping.ep_start.to_string(),
             end: mapping.ep_end.map(|e| e.to_string()).unwrap_or_default(),
@@ -349,7 +352,14 @@ pub fn update(app: &mut App, msg: Msg) -> Task<Message> {
             }) = &mut app.mapping.modal
             {
                 match form.build(original) {
-                    Ok(updated) => {
+                    Ok(mut updated) => {
+                        // The stored title belongs to the old entry.
+                        if updated.media_id != original.media_id {
+                            updated.title = core.entry_for(updated.media_id).map_or_else(
+                                || format!("AniList entry {}", updated.media_id),
+                                |entry| entry.media.title.preferred().to_owned(),
+                            );
+                        }
                         let id = original.jellyfin_id.clone();
                         let mut all: Vec<Mapping> = siblings
                             .into_iter()
@@ -764,18 +774,69 @@ fn change_body<'a>(app: &'a App, view: ChangeView<'a>) -> Column<'a, Msg> {
             Some(season) => Msg::UnmapSeason(view.item.id.clone(), season),
             None => Msg::Unmap(view.item.id.clone()),
         };
-        actions = actions
-            .push(ui::danger("Remove match", remove))
-            .push(ui::secondary(
-                "Exact editor…",
-                Msg::OpenEdit(Box::new((*first).clone())),
-            ));
+        actions = actions.push(ui::danger("Remove match", remove));
+        match view.scope.0 {
+            // One season: every entry of it can be edited, and another one added after the last.
+            Some(season) => {
+                let lines = current.iter().map(|mapping| {
+                    row![
+                        ui::muted(format!(
+                            "E{}–{} → {}",
+                            mapping.ep_start,
+                            mapping.ep_end.map_or("…".to_owned(), |e| e.to_string()),
+                            ui::ellipsize(&mapping.title, 54),
+                        )),
+                        ui::spacer(),
+                        ui::secondary("Edit…", Msg::OpenEdit(Box::new((*mapping).clone()))),
+                    ]
+                    .spacing(theme::S2)
+                    .align_y(Center)
+                    .into()
+                });
+                body = body
+                    .push(label("Entries of this season"))
+                    .push(ui::divided(lines.collect()));
+                actions = actions.push(ui::secondary(
+                    "Add entry…",
+                    Msg::OpenEdit(Box::new(entry_after(&view.item.id, season, &current))),
+                ));
+            }
+            None => {
+                actions = actions.push(ui::secondary(
+                    "Exact editor…",
+                    Msg::OpenEdit(Box::new((*first).clone())),
+                ));
+            }
+        }
     }
     body.push(ui::divider()).push(
         actions
             .push(ui::spacer())
             .push(ui::secondary("Close", Msg::Close)),
     )
+}
+
+/// Template for one more AniList entry in a season, starting after its last mapped episode.
+/// The AniList ID 0 stands for "not chosen yet".
+fn entry_after(jellyfin_id: &str, season: u32, current: &[&Mapping]) -> Mapping {
+    let start = current
+        .iter()
+        .filter(|m| m.season == season)
+        .map(|m| m.ep_end.unwrap_or(m.ep_start) + 1)
+        .max()
+        .unwrap_or(1);
+    Mapping {
+        jellyfin_id: jellyfin_id.to_owned(),
+        season,
+        ep_start: start,
+        ep_end: None,
+        media_id: 0,
+        // The new entry counts from its own first episode.
+        offset: 1 - start as i32,
+        source: MappingSource::Manual,
+        confidence: 1.0,
+        title: String::new(),
+    }
 }
 
 fn edit_body<'a>(form: &'a MappingForm, error: Option<&'a str>) -> Column<'a, Msg> {
@@ -870,6 +931,16 @@ mod tests {
             confidence: 0.8,
             title: "Show".into(),
         }
+    }
+
+    #[test]
+    fn a_new_entry_starts_after_the_last_one_and_counts_from_one() {
+        let first = mapping();
+        let added = entry_after("s", 1, &[&first]);
+        assert_eq!((added.ep_start, added.ep_end), (13, None));
+        assert_eq!(added.anilist_episode(13), Some(1));
+        // The ID is left for the user to fill in.
+        assert_eq!(MappingForm::new(&added).media, "");
     }
 
     #[test]

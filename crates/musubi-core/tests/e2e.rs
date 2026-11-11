@@ -7,6 +7,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use musubi_core::domain::{
     EntryPatch, ItemKind, LibraryItem, ListStatus, Mapping, MappingSource, MediaKind,
+    resolve_episode,
 };
 use musubi_core::{
     Config, Core, CoreError, CoreEvent, CoreOptions, EndReason, MatchOutcome, OpenRequest, Paths,
@@ -1054,4 +1055,144 @@ async fn matches_show_english_titles_and_can_be_added_to_a_list() {
         entry.media.title.preferred(),
         "Frieren: Beyond Journey's End"
     );
+}
+
+/// Jellyfin with one series. Each season is `(number, episodes, AniList ID on the season)`.
+async fn mock_seasons(seasons: &[(u32, u32, Option<&str>)]) -> MockServer {
+    let server = MockServer::start().await;
+    let ok = |body: Value| ResponseTemplate::new(200).set_body_json(body);
+    Mock::given(method("GET"))
+        .and(path("/System/Info/Public"))
+        .respond_with(ok(json!({})))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/Users/AuthenticateByName"))
+        .respond_with(ok(
+            json!({"AccessToken": "t", "User": {"Id": "u1", "Name": "eden"}}),
+        ))
+        .mount(&server)
+        .await;
+    let episodes: Vec<Value> = seasons
+        .iter()
+        .flat_map(|&(season, count, _)| {
+            (1..=count).map(move |number| {
+                json!({"Id": format!("e{season}x{number}"), "Name": "Ep", "SeriesName": "Show",
+                    "ParentIndexNumber": season, "IndexNumber": number})
+            })
+        })
+        .collect();
+    Mock::given(method("GET"))
+        .and(path("/Shows/s1/Episodes"))
+        .respond_with(ok(json!({ "Items": episodes })))
+        .mount(&server)
+        .await;
+    let metas: Vec<Value> = seasons
+        .iter()
+        .map(|&(season, _, id)| {
+            json!({"Id": format!("x{season}"), "Name": format!("Season {season}"),
+                "IndexNumber": season, "ProviderIds": {"AniList": id}})
+        })
+        .collect();
+    Mock::given(method("GET"))
+        .and(path("/Shows/s1/Seasons"))
+        .respond_with(ok(json!({ "Items": metas })))
+        .mount(&server)
+        .await;
+    server
+}
+
+/// AniList with a chain of TV entries `(id, title, episodes)`, each the sequel of the one
+/// before. The search finds the first.
+async fn mock_chain(works: &'static [(i64, &'static str, u32)]) -> MockServer {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(move |request: &Request| {
+            let body: Value = serde_json::from_slice(&request.body).unwrap();
+            let query = body["query"].as_str().unwrap();
+            let id = body["variables"]["id"].as_i64().unwrap_or(0);
+            let position = works.iter().position(|w| w.0 == id);
+            let node =
+                |&(id, title, episodes): &(i64, &str, u32)| anime(id, title, "TV", episodes, 2020);
+            let by_id = || match position {
+                Some(index) => node(&works[index]),
+                None => anime(id, "Something Else", "TV", 12, 2010),
+            };
+            let data = if query.contains("Viewer") {
+                json!({"Viewer": {"id": 7, "name": "eden",
+                    "mediaListOptions": {"scoreFormat": "POINT_100"}}})
+            } else if query.contains("MediaListCollection") {
+                json!({"MediaListCollection": {"hasNextChunk": false, "lists": []}})
+            } else if query.contains("Page") {
+                json!({"Page": {"media": [node(&works[0])]}})
+            } else if query.contains("relations") {
+                let edges: Vec<Value> = position
+                    .and_then(|index| works.get(index + 1))
+                    .map(|next| json!({"relationType": "SEQUEL", "node": node(next)}))
+                    .into_iter()
+                    .collect();
+                let mut media = by_id();
+                media["relations"] = json!({"edges": edges});
+                json!({"Media": media})
+            } else {
+                json!({"Media": by_id()})
+            };
+            ResponseTemplate::new(200)
+                .insert_header("X-RateLimit-Limit", "90")
+                .set_body_json(json!({"data": data}))
+        })
+        .mount(&server)
+        .await;
+    server
+}
+
+async fn chain_core(dir: &Path, jellyfin: &MockServer, anilist: &MockServer) -> Core {
+    let core = core(dir, anilist).await;
+    core.login_jellyfin(&jellyfin.uri(), "eden", &SecretString::from("pw"))
+        .await
+        .unwrap();
+    core.login_anilist_pin("token").await.unwrap();
+    core
+}
+
+#[tokio::test]
+async fn one_long_entry_spans_many_seasons_despite_wrong_season_ids() {
+    let dir = tempfile::tempdir().unwrap();
+    // The plugin put the sequel's ID on season 2 and one unrelated ID on seasons 3 and 4.
+    let jellyfin = mock_seasons(&[
+        (1, 10, Some("100")),
+        (2, 10, Some("200")),
+        (3, 10, Some("300")),
+        (4, 12, Some("300")),
+    ])
+    .await;
+    let anilist = mock_chain(&[(100, "Show", 30), (200, "Show Final Arc", 12)]).await;
+    let core = chain_core(dir.path(), &jellyfin, &anilist).await;
+
+    let outcome = core.auto_match(&series()).await.unwrap();
+
+    assert_eq!(outcome, MatchOutcome::Mapped);
+    let mappings = core.mappings_for("s1").await.unwrap();
+    assert_eq!(resolve_episode(&mappings, 1, 1), Some((100, 1)));
+    assert_eq!(resolve_episode(&mappings, 2, 1), Some((100, 11)));
+    assert_eq!(resolve_episode(&mappings, 3, 10), Some((100, 30)));
+    assert_eq!(resolve_episode(&mappings, 4, 1), Some((200, 1)));
+    assert_eq!(resolve_episode(&mappings, 4, 12), Some((200, 12)));
+}
+
+#[tokio::test]
+async fn a_two_part_season_skips_the_episode_zero_kept_in_specials() {
+    let dir = tempfile::tempdir().unwrap();
+    let jellyfin = mock_seasons(&[(0, 1, None), (1, 24, None)]).await;
+    let anilist = mock_chain(&[(1, "Show", 13), (2, "Show Part 2", 12)]).await;
+    let core = chain_core(dir.path(), &jellyfin, &anilist).await;
+
+    let outcome = core.auto_match(&series()).await.unwrap();
+
+    assert_eq!(outcome, MatchOutcome::Mapped);
+    let mappings = core.mappings_for("s1").await.unwrap();
+    assert_eq!(resolve_episode(&mappings, 1, 1), Some((1, 2)));
+    assert_eq!(resolve_episode(&mappings, 1, 12), Some((1, 13)));
+    assert_eq!(resolve_episode(&mappings, 1, 13), Some((2, 1)));
+    assert_eq!(resolve_episode(&mappings, 1, 24), Some((2, 12)));
 }

@@ -319,6 +319,29 @@ impl Carry {
         self.remaining()
             .is_some_and(|r| r > 0 && (r >= span.count || r > SMALL_DRIFT))
     }
+
+    /// Whether the rest of this entry covers the whole next season. That is stronger evidence
+    /// than a provider ID on the season, which metadata plugins often get wrong.
+    pub fn fills(&self, span: &SeasonSpan) -> bool {
+        self.remaining().is_some_and(|r| r > 0 && r >= span.count)
+    }
+}
+
+/// Episodes to skip at the start of a season's first entry. AniList counts an episode 0 or a
+/// recap that Jellyfin files under Specials; without the skip every later episode of the
+/// season is off by that much. Only assumed when the season is split over several entries
+/// that together hold a few episodes too many and the library has specials to account for them.
+pub fn leading_surplus(chain: &[ChainLink], used: u32, count: u32, specials: u32) -> u32 {
+    if chain.len() < 2 || used > 0 {
+        return 0;
+    }
+    let Some(total) = chain.iter().map(|l| l.episodes).sum::<Option<u32>>() else {
+        return 0;
+    };
+    match total.checked_sub(count) {
+        Some(surplus) if (1..=SMALL_DRIFT).contains(&surplus) && surplus <= specials => surplus,
+        _ => 0,
+    }
 }
 
 /// Ob eine Staffel ein weiteres Werk braucht. `covered` ist `None` bei offenem Ende.
@@ -631,6 +654,41 @@ mod tests {
 
     fn plan(seasons: &[SeasonSpan], chain: &[ChainLink]) -> Vec<Mapping> {
         plan_chain("x", seasons, chain, MappingSource::Title, 1.0)
+    }
+
+    #[test]
+    fn a_carry_fills_a_season_only_when_it_covers_all_of_it() {
+        let carry = Carry {
+            link: link(10, Some(366)),
+            used: 342,
+        };
+        assert!(carry.fills(&span(16, 1, 24)));
+        assert!(!carry.fills(&span(16, 1, 25)));
+        assert!(carry.continues_into(&span(16, 1, 25)));
+    }
+
+    #[test]
+    fn episode_zero_in_specials_is_skipped_at_the_season_start() {
+        let chain = [link(10, Some(13)), link(20, Some(12))];
+        assert_eq!(leading_surplus(&chain, 0, 24, 2), 1);
+        let plan = plan_season("x", &span(2, 1, 24), &chain, 1, MappingSource::Title, 1.0);
+        assert_eq!(resolve_episode(&plan.mappings, 2, 1), Some((10, 2)));
+        assert_eq!(resolve_episode(&plan.mappings, 2, 12), Some((10, 13)));
+        assert_eq!(resolve_episode(&plan.mappings, 2, 13), Some((20, 1)));
+        assert_eq!(resolve_episode(&plan.mappings, 2, 24), Some((20, 12)));
+        assert_eq!(plan.unmapped, 0);
+
+        // No specials, an exact fit, a single entry, an open end or a carried entry: no skip.
+        assert_eq!(leading_surplus(&chain, 0, 24, 0), 0);
+        assert_eq!(leading_surplus(&chain, 0, 25, 2), 0);
+        assert_eq!(leading_surplus(&chain[..1], 0, 12, 2), 0);
+        assert_eq!(
+            leading_surplus(&[link(10, Some(13)), link(20, None)], 0, 24, 2),
+            0
+        );
+        assert_eq!(leading_surplus(&chain, 3, 21, 2), 0);
+        // A larger gap is another part, not a bonus episode.
+        assert_eq!(leading_surplus(&chain, 0, 20, 9), 0);
     }
 
     #[test]

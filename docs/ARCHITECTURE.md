@@ -77,14 +77,15 @@ About a dozen operations do not justify a code generation step with a checked-in
 AniList usually has one entry per season, often per cour, while Jellyfin counts per season. So every Jellyfin season is matched on its own, in this order:
 
 1. **Manual match.** A manual match for the season always wins and serves as the starting point for the next season.
-2. **Season provider IDs.** The season's own `ProviderIds`: AniList directly, or MyAnimeList via `Media(idMal:)`. An ID already used by an earlier season is ignored, because some plugins copy the series ID into every season.
-3. **First season.** The series' `ProviderIds`, otherwise a title search.
+2. **A long entry goes on.** If the previous season's entry still has room for this whole season (one 366-episode AniList entry behind sixteen Jellyfin seasons), the season continues it, whatever ID the season carries.
+3. **Season provider IDs.** The season's own `ProviderIds`: AniList directly, or MyAnimeList via `Media(idMal:)`. An ID already used by an earlier season, or written on more than one season, is ignored: plugins copy IDs around, and an ID names one entry only.
+4. **First season.** The series' `ProviderIds`, otherwise a title search.
    - Titles are normalized and compared with Jaro–Winkler across all titles and synonyms.
    - Year, format and episode count add a bonus or a penalty.
    - A match is accepted automatically from 0.92 with a margin of at least 0.05 over the runner-up.
-4. **Later seasons.** The rest of the previous season's work if it spans both seasons, otherwise the next `SEQUEL`. Movies, OVAs and specials in between are skipped, but their sequels are followed.
-5. **Fallback.** A search for the season itself, e.g. "Title Season 2" or "Title <season name>". Candidates without a season number, or with the wrong one, get a penalty.
-6. **Guesses.** Otherwise the best candidate above a minimum score becomes an unsure match (`Guess`). If nothing qualifies, only that season stays unmatched.
+5. **Later seasons.** The rest of the previous season's work if it spans both seasons, otherwise the next `SEQUEL`. Movies, OVAs and specials in between are skipped, but their sequels are followed.
+6. **Fallback.** A search for the season itself, e.g. "Title Season 2" or "Title <season name>". Candidates without a season number, or with the wrong one, get a penalty.
+7. **Guesses.** Otherwise the best candidate above a minimum score becomes an unsure match (`Guess`). If nothing qualifies, only that season stays unmatched.
 
 "Unsure" applies per AniList entry. A guessed season does not write to AniList on its own and is proposed as `Skip` in the sync. The other seasons sync normally.
 
@@ -94,10 +95,11 @@ AniList usually has one entry per season, often per cour, while Jellyfin counts 
 - A work spanning several seasons is continued.
 - Absolute episode numbering is handled through the offset.
 - If the count differs by at most two episodes (a recap or bonus episode), the next season still starts at episode 1 of its own entry instead of drifting.
+- If a season split over several entries has one or two episodes fewer than they hold and the library has that many specials, the surplus is skipped at the start of the first entry (`leading_surplus`): AniList counts an episode 0 that Jellyfin keeps under Specials. This is a heuristic; the exact editor overrides it.
 
 Every match covers an episode range and carries an offset.
 
-Matching runs at startup, after login and on *Refresh* for every title not tried before. When upgrading to per-season matching (`matching_version` 2), automatic matches of multi-season series are re-planned once. The first season keeps its entry, and manual seasons are never overwritten. The change dialog matches a single season or all seasons at once.
+Matching runs at startup, after login and on *Refresh* for every title not tried before. When the matching rules change (`matching_version`, currently 3), automatic matches of multi-season series are re-planned once. The first season keeps its entry, and manual seasons are never overwritten. The change dialog matches a single season or all seasons at once.
 
 ### Sync rules
 
