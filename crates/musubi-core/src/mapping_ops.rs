@@ -835,6 +835,18 @@ impl Core {
         Ok(self.inner.db.all_mappings().await?)
     }
 
+    /// The library title matched to an AniList entry, with the season if the entry belongs
+    /// to a single one. `None` when nothing in the library is matched to it.
+    pub async fn library_item_for(
+        &self,
+        media_id: i64,
+    ) -> Result<Option<(LibraryItem, Option<u32>)>> {
+        let Some((id, season)) = self.inner.db.jellyfin_for_media(media_id).await? else {
+            return Ok(None);
+        };
+        Ok(Some((self.library_item(&id).await?, season)))
+    }
+
     pub async fn mappings_for(&self, jellyfin_id: &str) -> Result<Vec<Mapping>> {
         Ok(self.inner.db.mappings_for(jellyfin_id).await?)
     }

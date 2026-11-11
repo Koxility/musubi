@@ -635,7 +635,9 @@ impl App {
 
     fn page_content(&self) -> Element<'_, Message> {
         match self.page {
-            Page::Home | Page::Library if self.shows_detail() => library::detail_view(self),
+            Page::Home | Page::Library | Page::AniList if self.shows_detail() => {
+                library::detail_view(self)
+            }
             Page::Home => home::view(self),
             Page::Library => library::view(self),
             Page::AniList => anilist::view(self),

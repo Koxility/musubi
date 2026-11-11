@@ -244,6 +244,15 @@ pub fn open_detail(app: &mut App, item: LibraryItem) -> Task<Message> {
     }
 }
 
+/// Opens the detail page with `season` selected, for callers that know which one they mean.
+pub fn open_detail_at(app: &mut App, item: LibraryItem, season: Option<u32>) -> Task<Message> {
+    let task = open_detail(app, item);
+    if let Some(detail) = &mut app.library.detail {
+        detail.season = season;
+    }
+    task
+}
+
 pub fn update(app: &mut App, msg: Msg) -> Task<Message> {
     match msg {
         Msg::WantImage(key) => return app.want_image(key),

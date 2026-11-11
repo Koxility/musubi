@@ -15,7 +15,7 @@ use musubi_core::{ViewConfig, ViewMode, ViewSize};
 use crate::app::{App, Message};
 use crate::icons::Icon;
 use crate::images::ImageKey;
-use crate::{theme, ui};
+use crate::{library, theme, ui};
 
 /// Inset of the cards, so the hover surface shows around the cover.
 const CARD_PADDING: f32 = 6.0;
@@ -293,6 +293,14 @@ pub enum Msg {
     View(ViewConfig),
     Increment(ListEntry),
     OpenEditor(ListEntry),
+    /// Opens the Jellyfin title matched to this entry, or the editor if there is none.
+    OpenShow(Box<ListEntry>),
+    /// Carries the navigation generation of the click, like `home::Msg::Opened`.
+    ShowFound(
+        u64,
+        Box<ListEntry>,
+        Result<Option<(LibraryItem, Option<u32>)>, String>,
+    ),
     Edit(EditorEdit),
     SaveEditor,
     AskDelete,
@@ -427,6 +435,20 @@ pub fn update(app: &mut App, msg: Msg) -> Task<Message> {
             return ui::perform(async move { core.save_entry(patch).await }, Message::Notify);
         }
         Msg::OpenEditor(entry) => open_editor(app, entry),
+        Msg::OpenShow(entry) => {
+            let generation = app.nav_generation;
+            let media_id = entry.media.id;
+            return ui::perform(
+                async move { core.library_item_for(media_id).await },
+                move |found| Message::AniList(Msg::ShowFound(generation, entry.clone(), found)),
+            );
+        }
+        Msg::ShowFound(generation, ..) if generation != app.nav_generation => {}
+        Msg::ShowFound(_, _, Ok(Some((item, season)))) => {
+            return library::open_detail_at(app, item, season);
+        }
+        // Not in the library (or the server is away): the entry itself is all there is to show.
+        Msg::ShowFound(_, entry, _) => open_editor(app, *entry),
         Msg::Edit(edit) => {
             if let Some(Modal::Editor(editor)) = &mut app.anilist.modal {
                 apply_edit(&mut editor.form, edit);
@@ -634,8 +656,9 @@ fn plus_one<'a>(entry: &ListEntry) -> Element<'a, Msg> {
     )
 }
 
-/// Card in the style of the AniList home page. The "+1" sits in the top-right corner of
-/// the cover; an airing title shows the countdown right of its episode count.
+/// Card in the style of the AniList home page. A click opens the title in Jellyfin; the
+/// dots in the top-left corner of the cover edit the entry and the "+1" sits top-right. An
+/// airing title shows the countdown right of its episode count.
 fn entry_card<'a>(app: &'a App, entry: &ListEntry, size: ViewSize) -> Element<'a, Msg> {
     let cover_size = cover_size(size);
     let image = ui::with_progress(
@@ -693,9 +716,18 @@ fn entry_card<'a>(app: &'a App, entry: &ListEntry, size: ViewSize) -> Element<'a
     )
     .padding(CARD_PADDING)
     .style(theme::card_button)
-    .on_press(Msg::OpenEditor(entry.clone()));
+    .on_press(Msg::OpenShow(Box::new(entry.clone())));
     let behind = entry.episodes_behind();
-    let mut marks = row![].align_y(iced::Top);
+    let mut marks = row![ui::icon_button(
+        Icon::More,
+        14.0,
+        theme::PAPER,
+        Some(Msg::OpenEditor(entry.clone())),
+        "Edit entry",
+        theme::ghost_button,
+    )]
+    .spacing(theme::S2)
+    .align_y(iced::Top);
     if behind > 0 {
         marks = marks.push(ui::badge_row(format!("{behind} behind"), theme::WARN));
     }
