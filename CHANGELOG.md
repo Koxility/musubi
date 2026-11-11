@@ -4,6 +4,8 @@ All notable changes to Musubi are documented here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-11
+
 ### Added
 
 - **Several AniList entries per season, by hand.** The change dialog for a season lists each of its entries with its own *Edit…* and has *Add entry…* for another one. A title's page shows every entry of the selected season, not only the first.
@@ -94,6 +96,7 @@ First release.
 - Playback needs GStreamer with `gst-plugins-base`, `-good`, `-bad` and `gst-libav`.
 - You need your own AniList client ID; see the README.
 
+[0.4.0]: https://github.com/Koxility/musubi/releases/tag/v0.4.0
 [0.3.0]: https://github.com/Koxility/musubi/releases/tag/v0.3.0
 [0.2.0]: https://github.com/Koxility/musubi/releases/tag/v0.2.0
 [0.1.1]: https://github.com/Koxility/musubi/releases/tag/v0.1.1
