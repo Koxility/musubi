@@ -1,12 +1,12 @@
 //! Anmeldungen und Einstellungen.
 
-use iced::widget::{column, container, row, slider, svg, text};
+use iced::widget::{column, container, row, slider, text};
 use iced::{Center, Element, Fill, Task};
 use musubi_core::Config;
 
 use crate::anilist_login::{self, Outcome};
 use crate::app::{App, COMMIT, Message, VERSION};
-use crate::{setup, theme, ui};
+use crate::{logo, setup, theme, ui};
 
 #[derive(Default)]
 pub struct State {
@@ -183,9 +183,6 @@ fn half<'a>(field: Element<'a, Msg>) -> Element<'a, Msg> {
 }
 
 fn about<'a>() -> Element<'a, Msg> {
-    static MARK: std::sync::LazyLock<svg::Handle> = std::sync::LazyLock::new(|| {
-        svg::Handle::from_memory(include_bytes!("../assets/mark.svg").as_slice())
-    });
     let fact = |name: &'a str, value: &'a str| {
         row![
             ui::muted(name),
@@ -195,7 +192,7 @@ fn about<'a>() -> Element<'a, Msg> {
         .align_y(Center)
     };
     row![
-        svg(MARK.clone()).width(45).height(24),
+        logo::mark(36.0),
         column![
             text("Musubi").size(theme::T_BODY).font(theme::DISPLAY),
             ui::muted("Watch on Jellyfin, track on AniList."),

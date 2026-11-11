@@ -3191,6 +3191,7 @@ dependencies = [
  "musubi-player",
  "musubi-store",
  "open",
+ "resvg",
  "secrecy",
  "tempfile",
  "tokio",
