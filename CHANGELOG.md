@@ -4,6 +4,8 @@ All notable changes to Musubi are documented here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-11
+
 ### Added
 
 - **Match automatically.** The change dialog of a title has a *Match automatically* button that hands the title back to the automatic rules and replaces its current matches, manual ones included.
@@ -107,6 +109,7 @@ First release.
 - Playback needs GStreamer with `gst-plugins-base`, `-good`, `-bad` and `gst-libav`.
 - You need your own AniList client ID; see the README.
 
+[0.4.1]: https://github.com/Koxility/musubi/releases/tag/v0.4.1
 [0.4.0]: https://github.com/Koxility/musubi/releases/tag/v0.4.0
 [0.3.0]: https://github.com/Koxility/musubi/releases/tag/v0.3.0
 [0.2.0]: https://github.com/Koxility/musubi/releases/tag/v0.2.0
