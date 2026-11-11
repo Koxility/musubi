@@ -6,7 +6,7 @@ pub mod oauth;
 mod queries;
 pub mod rate;
 
-pub use client::{Client, Relation};
+pub use client::{Client, MEDIA_PAGE, Relation};
 pub use rate::RateLimiter;
 
 use std::time::Duration;

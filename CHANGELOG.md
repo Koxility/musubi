@@ -11,6 +11,7 @@ All notable changes to Musubi are documented here. The format follows [Keep a Ch
 
 ### Changed
 
+- **English titles.** AniList titles show in English where AniList has one, otherwise in Romaji, then in the native script. Titles stored with existing matches are updated once on the next start.
 - One logo everywhere: the sidebar, the About line and the window icon use the same mark as the launcher entry.
 - **Home is larger.** The hero for what to continue follows the window and shows the whole backdrop instead of a cropped strip; posters, cards and text in the rows are bigger. Rows also scroll by dragging the thin bar below the cards.
 - **Airing on the AniList overview** uses the same cover cards as "Anime in progress", with the countdown next to the episode count.

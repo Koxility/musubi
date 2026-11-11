@@ -28,6 +28,9 @@ const MAX_SEQUEL_DEPTH: usize = 3;
 /// Obergrenze für Relations-Abfragen pro Suche, wegen des Rate-Limits.
 const MAX_RELATION_LOOKUPS: usize = 6;
 const META_MATCHING_VERSION: &str = "matching_version";
+const META_TITLES_VERSION: &str = "mapping_titles_version";
+/// Version 1 stores the English title of a match where AniList has one, not the Romaji one.
+const TITLES_VERSION: u32 = 1;
 /// Version 2 ordnet jede Staffel einzeln zu. Ältere Zuordnungen werden einmal neu geplant.
 const MATCHING_VERSION: u32 = 2;
 
@@ -640,6 +643,10 @@ impl Core {
     /// werden automatische Zuordnungen von Serien mit mehreren Staffeln einmal pro Staffel neu
     /// geplant.
     pub async fn match_all(&self, retry_unmatched: bool) -> Result<()> {
+        // Not worth failing the run for: offline, the titles are refreshed next time.
+        if let Err(error) = self.refresh_mapping_titles().await {
+            tracing::warn!(%error, "could not refresh the titles of matches");
+        }
         if MATCH_RUNNING.swap(true, Ordering::SeqCst) {
             return Ok(());
         }
@@ -729,6 +736,57 @@ impl Core {
             message.push_str(&format!(", {replanned} re-matched season by season"));
         }
         self.inner.emit(CoreEvent::Notice { ok: true, message });
+        Ok(())
+    }
+
+    /// Brings the titles stored with matches in line with [`MediaTitle::preferred`], once
+    /// after an update that changed which title is shown. Titles on the user's lists are
+    /// known already; the rest is fetched in batches.
+    ///
+    /// [`MediaTitle::preferred`]: musubi_domain::MediaTitle::preferred
+    pub async fn refresh_mapping_titles(&self) -> Result<()> {
+        let stored = self.inner.db.meta_get(META_TITLES_VERSION).await?;
+        if stored.and_then(|v| v.parse::<u32>().ok()).unwrap_or(0) >= TITLES_VERSION {
+            return Ok(());
+        }
+        let Some(session) = self.inner.anilist() else {
+            return Ok(());
+        };
+        let mappings = self.inner.db.all_mappings().await?;
+        let ids: HashSet<i64> = mappings.iter().map(|m| m.media_id).collect();
+        let mut titles: Vec<(i64, String)> = Vec::new();
+        let mut unknown: Vec<i64> = Vec::new();
+        for id in ids {
+            match self.inner.entry_for(id) {
+                Some(entry) => titles.push((id, entry.media.title.preferred().to_owned())),
+                None => unknown.push(id),
+            }
+        }
+        for chunk in unknown.chunks(musubi_anilist::MEDIA_PAGE) {
+            let fetched = session.client.media_many(chunk).await?;
+            titles.extend(
+                fetched
+                    .iter()
+                    .map(|media| (media.id, media.title.preferred().to_owned())),
+            );
+        }
+        let mut changed = false;
+        for (id, title) in titles {
+            let outdated = mappings
+                .iter()
+                .any(|m| m.media_id == id && m.title != title);
+            if outdated {
+                self.inner.db.set_mapping_title(id, &title).await?;
+                changed = true;
+            }
+        }
+        self.inner
+            .db
+            .meta_set(META_TITLES_VERSION, &TITLES_VERSION.to_string())
+            .await?;
+        if changed {
+            self.inner.emit(CoreEvent::MappingsChanged);
+        }
         Ok(())
     }
 

@@ -236,6 +236,19 @@ impl Db {
         .await
     }
 
+    /// Sets the display title of every mapping to this AniList work.
+    pub async fn set_mapping_title(&self, media_id: i64, title: &str) -> Result<(), DbError> {
+        let title = title.to_owned();
+        self.call(move |c| {
+            c.execute(
+                "UPDATE mappings SET title = ?2 WHERE media_id = ?1",
+                params![media_id, title],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
     /// Ersetzt alle Zuordnungen einer Serie und entfernt sie aus der Prüfliste.
     pub async fn replace_mappings(
         &self,
@@ -630,6 +643,10 @@ mod tests {
             .unwrap();
         assert_eq!(db.mappings_for("a").await.unwrap(), vec![mapping]);
         assert!(db.reviews().await.unwrap().is_empty());
+
+        db.set_mapping_title(5, "B").await.unwrap();
+        db.set_mapping_title(6, "C").await.unwrap();
+        assert_eq!(db.mappings_for("a").await.unwrap()[0].title, "B");
     }
 
     #[tokio::test]

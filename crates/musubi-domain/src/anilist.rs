@@ -293,12 +293,13 @@ pub struct MediaTitle {
 }
 
 impl MediaTitle {
-    /// Bevorzugter Anzeigetitel: Romaji, dann Englisch, dann Originaltitel.
+    /// The title to display: English where AniList has one, otherwise Romaji, then the
+    /// native title.
     pub fn preferred(&self) -> &str {
-        self.romaji
-            .as_deref()
-            .or(self.english.as_deref())
-            .or(self.native.as_deref())
+        [&self.english, &self.romaji, &self.native]
+            .into_iter()
+            .filter_map(|title| title.as_deref())
+            .find(|title| !title.trim().is_empty())
             .unwrap_or("(untitled)")
     }
 
@@ -622,6 +623,28 @@ impl Profile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn display_title_prefers_english_and_falls_back() {
+        let title =
+            |english: Option<&str>, romaji: Option<&str>, native: Option<&str>| MediaTitle {
+                romaji: romaji.map(str::to_owned),
+                english: english.map(str::to_owned),
+                native: native.map(str::to_owned),
+            };
+        let full = title(
+            Some("Frieren"),
+            Some("Sousou no Frieren"),
+            Some("葬送のフリーレン"),
+        );
+        assert_eq!(full.preferred(), "Frieren");
+        let no_english = title(None, Some("Sousou no Frieren"), Some("葬送のフリーレン"));
+        assert_eq!(no_english.preferred(), "Sousou no Frieren");
+        // An empty English title counts as missing.
+        let blank = title(Some(" "), None, Some("葬送のフリーレン"));
+        assert_eq!(blank.preferred(), "葬送のフリーレン");
+        assert_eq!(title(None, None, None).preferred(), "(untitled)");
+    }
 
     #[test]
     fn score_counts_always_cover_ten_steps() {

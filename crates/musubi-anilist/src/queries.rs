@@ -81,6 +81,12 @@ query ($search: String, $type: MediaType, $formats: [MediaFormat], $perPage: Int
 pub const MEDIA_BY_ID: &str = "
 query ($id: Int) { Media(id: $id) { ...MediaFields } }";
 
+/// Several works at once, e.g. to bring stored titles up to date.
+pub const MEDIA_BY_IDS: &str = "
+query ($ids: [Int], $perPage: Int) {
+  Page(page: 1, perPage: $perPage) { media(id_in: $ids) { ...MediaFields } }
+}";
+
 pub const MEDIA_BY_MAL: &str = "
 query ($idMal: Int, $type: MediaType) { Media(idMal: $idMal, type: $type) { ...MediaFields } }";
 
