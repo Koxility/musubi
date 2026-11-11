@@ -19,17 +19,13 @@ use crate::{Error, Result};
 
 const MAX_REQUEST: usize = 16 * 1024;
 
-/// Loopback port in the redirect URL registered for the built-in AniList app.
-pub const BUILTIN_LOOPBACK_PORT: u16 = 47823;
+/// Client ID of Musubi's own AniList API client. With it, logging in takes nothing but the
+/// browser. A client ID is public; the implicit grant needs no client secret, so none is
+/// kept anywhere in the app.
+pub const BUILTIN_CLIENT_ID: &str = "56388";
 
-/// Client ID of the AniList app that ships with Musubi, baked in at build time from
-/// `MUSUBI_ANILIST_CLIENT_ID`. With it, logging in takes nothing but the browser. A build
-/// without it asks for the client ID of the user's own app.
-pub fn builtin_client_id() -> Option<&'static str> {
-    option_env!("MUSUBI_ANILIST_CLIENT_ID")
-        .map(str::trim)
-        .filter(|id| !id.is_empty())
-}
+/// Loopback port in the redirect URL registered for that client.
+pub const BUILTIN_LOOPBACK_PORT: u16 = 47823;
 
 pub fn authorize_url(client_id: &str) -> String {
     let mut url =

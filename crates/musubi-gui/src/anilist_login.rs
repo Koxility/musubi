@@ -62,23 +62,11 @@ impl State {
         let id = self.client_id.trim();
         (!id.is_empty()).then(|| id.to_owned())
     }
-
-    /// Whether the browser login can start without the user entering anything.
-    fn ready(&self) -> bool {
-        oauth::builtin_client_id().is_some() || self.own_client_id().is_some()
-    }
 }
 
 pub fn update(state: &mut State, core: &Core, msg: Msg) -> (Task<Msg>, Outcome) {
     match msg {
         Msg::Start => {
-            if !state.ready() {
-                state.advanced = true;
-                return (
-                    Task::none(),
-                    Outcome::Failed("Enter the client ID of your AniList app.".to_owned()),
-                );
-            }
             let own = state.own_client_id();
             if let Err(error) = core.update_config(|c| c.anilist.client_id = own) {
                 return (Task::none(), Outcome::Failed(error.to_string()));
@@ -134,8 +122,9 @@ pub fn update(state: &mut State, core: &Core, msg: Msg) -> (Task<Msg>, Outcome) 
 fn advanced(state: &State) -> Element<'_, Msg> {
     column![
         ui::muted(
-            "To use your own AniList API client, create one on the developer page with the \
-             redirect URL below and enter its client ID. The client secret is not needed."
+            "Musubi logs in through its own AniList API client. To use yours instead, create \
+             one on the developer page with the redirect URL below and enter its client ID. \
+             The client secret is not needed. Leave the field empty to go back to Musubi's."
         ),
         row![ui::secondary(
             "Open the AniList developer page",
@@ -168,14 +157,8 @@ fn advanced(state: &State) -> Element<'_, Msg> {
 
 /// The login form: one button, and the advanced options folded away below it.
 pub fn view(state: &State, logged_in: bool) -> Element<'_, Msg> {
-    let ready = state.ready();
-    let hint = if ready {
-        "Musubi opens AniList in your browser. Approve it there and you are logged in with \
-         your own personal token. There is nothing to copy or paste."
-    } else {
-        "This build has no built-in AniList client. Enter the client ID of your own below, \
-         then log in with your browser."
-    };
+    let hint = "Musubi opens AniList in your browser. Approve it there and you are logged in \
+                with your own personal token. There is nothing to copy or paste.";
     let action: Element<'_, Msg> = if state.waiting.is_some() {
         row![
             ui::icon(Icon::Clock, 16.0, theme::TRACK),
@@ -202,19 +185,20 @@ pub fn view(state: &State, logged_in: bool) -> Element<'_, Msg> {
         )]
         .into()
     };
-    // Without any client the advanced options are the only way in, so they stay open.
-    let open = state.advanced || !ready;
-    let mut form = column![ui::muted(hint), action].spacing(theme::S3);
-    if ready {
-        form = form.push(row![ui::quiet(
+    let open = state.advanced;
+    let mut form = column![
+        ui::muted(hint),
+        action,
+        row![ui::quiet(
             if open {
                 "Hide advanced options"
             } else {
                 "Use my own API client or a token"
             },
             Msg::Advanced(!open)
-        )]);
-    }
+        )],
+    ]
+    .spacing(theme::S3);
     if open {
         form = form.push(advanced(state));
     }

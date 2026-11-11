@@ -70,7 +70,7 @@ Click *Log in with AniList*. Musubi opens AniList in your browser; approve it th
 <details>
 <summary>Using your own AniList API client, or logging in without a browser</summary>
 
-Under *Use my own API client or a token* you can enter the client ID of your own AniList client. A build without a built-in client, such as your own build from source, always asks for one:
+Musubi logs in through its own AniList API client. Under *Use my own API client or a token* you can enter the client ID of yours instead:
 
 1. Open <https://anilist.co/settings/developer> and create a new client.
 2. Use `http://127.0.0.1:47823/callback` as the redirect URL.
@@ -87,7 +87,7 @@ AniList tokens are valid for one year. Musubi reminds you 14 days before yours e
 | Page | What it does |
 |---|---|
 | **Home** | A large hero for what to continue, then rows for continue watching, next up and recently added |
-| **Library** | Browse and filter your Jellyfin library as a grid or a list; open a title to see its seasons and episodes |
+| **Library** | Browse and filter your Jellyfin library as a grid or a list; open a title to see its seasons and episodes, and to add its AniList match to one of your lists |
 | **AniList** | Airing titles with countdowns, what is in progress, your lists and quick `+1` progress |
 | **Mapping** | Check and change which AniList entry each season belongs to |
 | **Sync** | Compare Jellyfin and AniList and fix differences in either direction |

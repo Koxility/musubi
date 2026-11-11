@@ -89,38 +89,31 @@ impl Core {
 
     /// Client ID and loopback port for the login: the user's own AniList app when one is
     /// configured, otherwise the app built into Musubi.
-    fn anilist_app(&self) -> Result<(String, u16)> {
+    fn anilist_app(&self) -> (String, u16) {
         let config = self.inner.config().anilist;
         let own = config
             .client_id
             .map(|id| id.trim().to_owned())
             .filter(|id| !id.is_empty());
-        match (own, oauth::builtin_client_id()) {
-            (Some(id), _) => Ok((id, config.loopback_port)),
-            // The built-in app is registered with one fixed redirect URL.
-            (None, Some(id)) => Ok((id.to_owned(), oauth::BUILTIN_LOOPBACK_PORT)),
-            (None, None) => Err(CoreError::Invalid(
-                "this build has no AniList app; create one at \
-                 https://anilist.co/settings/developer and enter its client ID"
-                    .to_owned(),
-            )),
+        match own {
+            Some(id) => (id, config.loopback_port),
+            // The built-in client is registered with one fixed redirect URL.
+            None => (
+                oauth::BUILTIN_CLIENT_ID.to_owned(),
+                oauth::BUILTIN_LOOPBACK_PORT,
+            ),
         }
     }
 
-    /// Whether the browser login works without any setup by the user.
-    pub fn anilist_login_ready(&self) -> bool {
-        self.anilist_app().is_ok()
-    }
-
     /// URL where the user approves Musubi on AniList.
-    pub fn anilist_authorize_url(&self) -> Result<String> {
-        Ok(oauth::authorize_url(&self.anilist_app()?.0))
+    pub fn anilist_authorize_url(&self) -> String {
+        oauth::authorize_url(&self.anilist_app().0)
     }
 
     /// Opens the browser and waits for the redirect to the local server. The token AniList
     /// issues there is personal to the user who approved.
     pub async fn login_anilist_loopback(&self) -> Result<Viewer> {
-        let (client_id, port) = self.anilist_app()?;
+        let (client_id, port) = self.anilist_app();
         let url = oauth::authorize_url(&client_id);
         let listener = oauth::bind_loopback(port).await?;
         if let Err(error) = open::that_detached(&url) {

@@ -7,7 +7,7 @@ All notable changes to Musubi are documented here. The format follows [Keep a Ch
 ### Added
 
 - **View options** in Library and AniList: grid or list, each in three sizes, switched at the top right and remembered per page. The Library gains a list view with year, genres, AniList status and episodes left.
-- **One-click AniList login.** Builds with the built-in AniList client only need *Log in with AniList*: approve Musubi in the browser and AniList issues your personal token. A waiting login can be cancelled. Your own API client and a pasted token remain available under the advanced options.
+- **One-click AniList login.** Musubi ships with its own AniList client, so *Log in with AniList* is all it takes: approve Musubi in the browser and AniList issues your personal token. A waiting login can be cancelled. Your own API client and a pasted token remain available under the advanced options.
 
 ### Changed
 
