@@ -7,6 +7,7 @@ All notable changes to Musubi are documented here. The format follows [Keep a Ch
 ### Added
 
 - **Several AniList entries per season, by hand.** The change dialog for a season lists each of its entries with its own *Edit…* and has *Add entry…* for another one. A title's page shows every entry of the selected season, not only the first.
+- **Collapsible sidebar.** The menu button next to the logo, or `Ctrl+B`, hides the navigation and gives the page the full width; the button stays in the corner to bring it back. Musubi remembers the choice.
 - **Jump from AniList to the show.** Clicking a cover on the AniList overview (Airing and in progress) opens the matched title from your Jellyfin library, on the season the entry belongs to. Editing the entry moved to the ⋯ button in the top-left corner of the cover; titles that are not in your library still open the editor.
 
 ### Changed

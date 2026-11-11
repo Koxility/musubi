@@ -137,6 +137,7 @@ Library and AniList have a view switch at the top right: grid or list, each in t
 |---|---|
 | `Ctrl+1` … `Ctrl+7` | Switch page: Home, Library, AniList, Mapping, Sync, Settings, Profile |
 | `Ctrl+R` | Refresh |
+| `Ctrl+B` | Show or hide the sidebar |
 | `Esc` | Close a dialog, the detail page or the player |
 | `Space` / `Ctrl+P` | Play / pause |
 | `←` / `→` | Seek 10 s (in the player) |
