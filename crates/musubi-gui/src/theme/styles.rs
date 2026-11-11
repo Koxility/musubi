@@ -159,6 +159,14 @@ pub fn video(_: &Theme) -> container::Style {
 }
 
 /// Dunkelt die Seite hinter einem Dialog ab.
+/// The page background at `opacity`, laid over a view that is fading in.
+pub fn veil(opacity: f32) -> impl Fn(&Theme) -> container::Style {
+    move |_| container::Style {
+        background: (opacity > 0.0).then(|| alpha(INK, opacity).into()),
+        ..container::Style::default()
+    }
+}
+
 pub fn dim(_: &Theme) -> container::Style {
     container::Style {
         background: Some(alpha(Color::from_rgb8(0x05, 0x08, 0x10), 0.72).into()),

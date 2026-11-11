@@ -129,7 +129,7 @@ AniList tokens are valid for one year. Musubi reminds you 14 days before yours e
 | **Sync** | Compare Jellyfin and AniList and apply differences in either direction |
 | **Settings** | Accounts, sync and playback options |
 
-Library and AniList have a view switch at the top right: grid or list, each in three sizes. Musubi remembers the choice per page. The rows on Home scroll sideways with a touchpad swipe, `Shift` + mouse wheel, the arrows in the row header or the thin bar below the cards.
+Library and AniList have a view switch at the top right: grid or list, each in three sizes. Musubi remembers the choice per page. The rows on Home scroll sideways by dragging the cards with the mouse, with a touchpad swipe, `Shift` + mouse wheel, the arrows in the row header or the thin bar below the cards.
 
 ### Keyboard shortcuts
 

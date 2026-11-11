@@ -12,6 +12,7 @@ All notable changes to Musubi are documented here. The format follows [Keep a Ch
 
 ### Changed
 
+- **Home feels more fluid.** The rows scroll by dragging the cards with the mouse, and a flick carries them on; the arrows glide instead of jumping. Covers fade in as they load and pages fade in when you switch.
 - **Smarter matching of long and split series.** One AniList entry now continues across as many Jellyfin seasons as it has episodes for, even when the metadata plugin wrote other IDs on those seasons, so a classic run split into many seasons maps to its single entry and the sequels follow after it. A season split over several AniList entries skips an episode 0 that Jellyfin keeps under Specials instead of counting every episode one too low. Automatic matches of multi-season series are re-planned once on the next start; manual ones stay.
 
 ## [0.3.0] - 2026-11-11

@@ -145,6 +145,8 @@ pub struct App {
     pub frame: Instant,
     /// Whether the navigation rail is shown; animates its width.
     rail: Animation<bool>,
+    /// When the visible view last changed; it fades in from then.
+    view_changed_at: Instant,
 }
 
 /// Macht den Kern zum Schlüssel einer Subscription. Es gibt immer genau einen.
@@ -260,6 +262,7 @@ impl App {
             toast: None,
             help: false,
             frame: Instant::now(),
+            view_changed_at: Instant::now(),
             rail: Animation::new(!config.ui.sidebar_collapsed)
                 .duration(theme::MOTION)
                 .easing(Easing::EaseOutCubic),
@@ -292,6 +295,11 @@ impl App {
             keyboard::listen().filter_map(on_key),
             iced::time::every(Duration::from_secs(1)).map(|_| Message::Tick),
             video::subscription(&self.video, self.video_link.as_ref()),
+            if self.page == Page::Home && !self.video.is_active() {
+                home::subscription(&self.home)
+            } else {
+                Subscription::none()
+            },
             if self.animating() {
                 iced::window::frames().map(Message::Frame)
             } else {
@@ -304,6 +312,15 @@ impl App {
     /// idle window costs nothing.
     fn animating(&self) -> bool {
         self.rail.is_animating(self.frame)
+            || self.images.fading()
+            || home::gliding(&self.home)
+            || self.frame.saturating_duration_since(self.view_changed_at) < theme::FADE
+    }
+
+    /// Starts the fade-in of a view that just became visible.
+    fn fade_view(&mut self) {
+        self.frame = Instant::now();
+        self.view_changed_at = self.frame;
     }
 
     fn load_everything(&mut self) -> Task<Message> {
@@ -395,6 +412,7 @@ impl App {
         self.page = page;
         self.nav_generation += 1;
         self.view_epoch += 1;
+        self.fade_view();
         self.library.detail = None;
         self.anilist.close_modal();
         self.mapping.close_modal();
@@ -427,12 +445,14 @@ impl App {
     pub fn close_detail(&mut self) {
         if self.library.detail.take().is_some() {
             self.view_epoch += 1;
+            self.fade_view();
         }
     }
 
     /// Meldet eine neu geöffnete Ansicht, z. B. eine Detailseite.
     pub fn view_changed(&mut self) {
         self.view_epoch += 1;
+        self.fade_view();
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
@@ -467,7 +487,12 @@ impl App {
                 self.rail.go_mut(shown, self.frame);
                 self.remember(|config| config.ui.sidebar_collapsed = !shown);
             }
-            Message::Frame(at) => self.frame = at,
+            Message::Frame(at) => {
+                let dt = at.saturating_duration_since(self.frame);
+                self.frame = at;
+                self.images.tick(at);
+                return home::frame(self, dt);
+            }
             Message::Core(event) => return self.on_core_event(event),
             Message::ImageLoaded(key, result) => self.images.loaded(key, result),
             Message::Notify(result) => self.report(result),
@@ -692,9 +717,11 @@ impl App {
             .is_some_and(|d| d.origin == self.page && d.opened_at == self.nav_generation)
     }
 
-    /// Die aktuelle Seite. Iced übernimmt Widget-Zustand wie die Scroll-Position, solange an
-    /// derselben Stelle derselbe Widget-Typ steht. Mit jedem Ansichtswechsel wechselt deshalb
-    /// die Verschachtelungstiefe, und die neue Ansicht beginnt garantiert oben und frisch.
+    /// The current page. Iced keeps widget state such as the scroll position as long as the
+    /// same widget type sits in the same place. So the nesting depth changes with every view
+    /// change, and the new view is sure to start fresh and at the top. A veil in the page
+    /// colour lies over it and clears while the view fades in; it is always there, because
+    /// adding and removing it would itself reset the page's state.
     fn page_view(&self) -> Element<'_, Message> {
         let content = self.page_content();
         let content = if self.view_epoch.is_multiple_of(2) {
@@ -702,7 +729,15 @@ impl App {
         } else {
             container(content).width(Fill).height(Fill).into()
         };
-        container(content).width(Fill).height(Fill).into()
+        let veil = 1.0 - theme::fade_in(self.frame.saturating_duration_since(self.view_changed_at));
+        stack![
+            container(content).width(Fill).height(Fill),
+            container(Space::new())
+                .width(Fill)
+                .height(Fill)
+                .style(theme::veil(veil))
+        ]
+        .into()
     }
 
     fn page_content(&self) -> Element<'_, Message> {
@@ -832,7 +867,7 @@ mod tests {
         assert!(app.core.config().ui.sidebar_collapsed);
         let again = App::boot(app.core.clone(), None).0;
         assert!(!again.rail.value());
-        assert!(!again.animating());
+        assert!(!again.rail.is_animating(again.frame));
     }
 
     fn show() -> LibraryItem {

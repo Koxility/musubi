@@ -41,6 +41,8 @@ The GUI is pure Rust without system toolkits like GTK and looks the same on ever
 - Posters load only when they scroll into view. The cache files are named `*.img`, so the GUI reads them as bytes; when given a path, Iced picks the decoder by file extension.
 - Iced has no virtualized grids, so the library builds widgets for every title.
 - Iced keeps widget state such as scroll position as long as the same widget type sits at the same place in the tree. On every view change (page switch, detail page opened or closed), the nesting depth of the page alternates so that the new view starts fresh. `keyed_column` is not an option here: in Iced 0.14 it diffs equally long child lists without a type check and panics when the page type changes.
+- Motion runs on one frame clock: `Message::Frame` from `window::frames()`, subscribed only while something moves (`App::animating`: the sidebar, a gliding shelf, a cover or a page fading in). Every animated value is read at `App::frame`. Whoever starts a motion sets `frame` to now. The page fade is a veil over the page that is always in the tree; inserting it only while fading would reset the page's widget state.
+- Shelves on Home are dragged through raw pointer events (`home::subscription`), because the cards are buttons and capture the press before a wrapping widget sees it. A press that became a drag suppresses the click that ends it.
 
 ### Player: GStreamer inside the window
 
