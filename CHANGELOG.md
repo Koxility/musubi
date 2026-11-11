@@ -4,6 +4,8 @@ All notable changes to Musubi are documented here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-11
+
 ### Added
 
 - **View options** in Library and AniList: grid or list, each in three sizes, switched at the top right and remembered per page. The Library gains a list view with year, genres, AniList status and episodes left.
@@ -81,6 +83,7 @@ First release.
 - Playback needs GStreamer with `gst-plugins-base`, `-good`, `-bad` and `gst-libav`.
 - You need your own AniList client ID; see the README.
 
+[0.3.0]: https://github.com/Koxility/musubi/releases/tag/v0.3.0
 [0.2.0]: https://github.com/Koxility/musubi/releases/tag/v0.2.0
 [0.1.1]: https://github.com/Koxility/musubi/releases/tag/v0.1.1
 [0.1.0]: https://github.com/Koxility/musubi/releases/tag/v0.1.0
