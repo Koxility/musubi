@@ -109,6 +109,15 @@ pub fn tag(color: Color) -> impl Fn(&Theme) -> container::Style {
     }
 }
 
+/// Halbtransparenter Streifen über einem Titelbild, links mit Kordelfarbe markiert.
+pub fn strip(cord: Color) -> impl Fn(&Theme) -> container::Style {
+    move |_| container::Style {
+        background: Some(alpha(SURFACE, 0.72).into()),
+        border: outlined(alpha(cord, 0.35), R_MD),
+        ..container::Style::default()
+    }
+}
+
 pub fn dialog(_: &Theme) -> container::Style {
     container::Style {
         background: Some(SURFACE.into()),
@@ -453,21 +462,36 @@ pub fn toggle(_: &Theme, status: toggler::Status) -> toggler::Style {
 
 /// Schmale Scrollleiste, die erst beim Überfahren deutlich wird.
 pub fn scroll(_: &Theme, status: scrollable::Status) -> scrollable::Style {
-    let engaged = matches!(
-        status,
+    let (engaged, idle) = match status {
+        scrollable::Status::Active {
+            is_horizontal_scrollbar_disabled,
+            is_vertical_scrollbar_disabled,
+        } => (
+            false,
+            is_horizontal_scrollbar_disabled && is_vertical_scrollbar_disabled,
+        ),
         scrollable::Status::Hovered {
-            is_horizontal_scrollbar_hovered: true,
-            ..
-        } | scrollable::Status::Hovered {
-            is_vertical_scrollbar_hovered: true,
-            ..
-        } | scrollable::Status::Dragged { .. }
-    );
+            is_horizontal_scrollbar_hovered,
+            is_vertical_scrollbar_hovered,
+            is_horizontal_scrollbar_disabled,
+            is_vertical_scrollbar_disabled,
+        } => (
+            is_horizontal_scrollbar_hovered || is_vertical_scrollbar_hovered,
+            is_horizontal_scrollbar_disabled && is_vertical_scrollbar_disabled,
+        ),
+        scrollable::Status::Dragged { .. } => (true, false),
+    };
+    // Passt der Inhalt ganz in den Bereich, bleibt die Leiste unsichtbar.
+    let strength = match (idle, engaged) {
+        (true, _) => 0.0,
+        (false, true) => 0.38,
+        (false, false) => 0.14,
+    };
     let rail = scrollable::Rail {
         background: None,
         border: rounded(PILL),
         scroller: scrollable::Scroller {
-            background: alpha(PAPER, if engaged { 0.38 } else { 0.14 }).into(),
+            background: alpha(PAPER, strength).into(),
             border: rounded(PILL),
         },
     };

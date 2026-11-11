@@ -401,12 +401,18 @@ pub fn picture<'a, M: Clone + 'a>(
             .into();
     };
     let content: Element<'a, M> = match images.get(&key) {
-        Some(handle) => image(handle.clone())
-            .width(width)
-            .height(height)
-            .content_fit(ContentFit::Cover)
-            .border_radius(theme::R_SM)
-            .into(),
+        // Der Container beschneidet: Ein Bild mit `Fill` ragt sonst über seine Höhe hinaus.
+        Some(handle) => container(
+            image(handle.clone())
+                .width(width)
+                .height(height)
+                .content_fit(ContentFit::Cover)
+                .border_radius(theme::R_SM),
+        )
+        .width(width)
+        .height(height)
+        .clip(true)
+        .into(),
         None => container(Space::new())
             .width(width)
             .height(height)
@@ -483,22 +489,63 @@ pub fn section<'a, M: 'a>(
     column![title, content.into()].spacing(S3).into()
 }
 
-/// Waagerechte Leiste ohne sichtbaren Scrollbalken.
-pub fn shelf<'a, M: 'a>(
+/// Waagerechte Leiste ohne sichtbaren Scrollbalken. Die Pfeile im Kopf blättern, weil ein
+/// Mausrad nur senkrecht scrollt.
+pub fn shelf<'a, M: Clone + 'a>(
     title: &'a str,
+    id: &'static str,
     items: Vec<Element<'a, M>>,
     padding: Padding,
+    card_inset: f32,
+    on_scroll: fn(&'static str, f32) -> M,
 ) -> Element<'a, M> {
     let count = items.len();
+    // Karten haben einen eigenen Rand; ihr Bild soll trotzdem bündig unter der Überschrift stehen.
+    let cards = Padding {
+        left: padding.left - card_inset,
+        ..padding
+    };
+    let arrow = |glyph, label, step: f32| {
+        icon_button(
+            glyph,
+            15.0,
+            theme::MUTED,
+            Some(on_scroll(id, step)),
+            label,
+            theme::quiet,
+        )
+    };
     column![
-        container(heading_count(title, count)).padding(padding),
-        scrollable(container(row(items).spacing(S3)).padding(padding))
+        container(
+            row![
+                heading_count(title, count),
+                spacer(),
+                arrow(Icon::ChevronLeft, "Scroll back", -SHELF_STEP),
+                arrow(Icon::ChevronRight, "Scroll on", SHELF_STEP),
+            ]
+            .spacing(S1)
+            .align_y(Center)
+        )
+        .padding(padding),
+        scrollable(container(row(items).spacing(S2)).padding(cards))
+            .id(id)
             .direction(Direction::Horizontal(Scrollbar::hidden()))
             .width(Fill),
     ]
-    .spacing(S2)
+    .spacing(S1)
     .into()
 }
+
+/// Blättert ein Regal um `step` Pixel weiter.
+pub fn scroll_shelf<M: Send + 'static>(id: &'static str, step: f32) -> Task<M> {
+    iced::widget::operation::scroll_by(
+        id,
+        iced::widget::scrollable::AbsoluteOffset { x: step, y: 0.0 },
+    )
+}
+
+/// Schrittweite der Pfeile eines Regals.
+const SHELF_STEP: f32 = 640.0;
 
 /// Fläche für eine Gruppe zusammengehöriger Zeilen.
 pub fn card<'a, M: 'a>(content: impl Into<Element<'a, M>>) -> Element<'a, M> {
