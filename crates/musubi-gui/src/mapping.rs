@@ -153,6 +153,8 @@ pub enum Msg {
     Edit(FormEdit),
     SubmitEdit,
     Unmap(String),
+    /// Hands a title back to automatic matching, replacing whatever it is matched to now.
+    AutoMatch(Box<LibraryItem>),
     UnmapSeason(String, u32),
     Close,
 }
@@ -380,6 +382,13 @@ pub fn update(app: &mut App, msg: Msg) -> Task<Message> {
                     Err(message) => *error = Some(message),
                 }
             }
+        }
+        Msg::AutoMatch(item) => {
+            app.mapping.modal = None;
+            return ui::perform(
+                async move { core.auto_match(&item).await.map(|_| ()) },
+                Message::Notify,
+            );
         }
         Msg::Unmap(id) => {
             app.mapping.modal = None;
@@ -768,7 +777,15 @@ fn change_body<'a>(app: &'a App, view: ChangeView<'a>) -> Column<'a, Msg> {
     if let Some(error) = view.error {
         body = body.push(ui::error_line(error));
     }
-    let mut actions = row![].spacing(theme::S2).align_y(Center);
+    let mut actions = row![ui::with_tip(
+        ui::secondary(
+            "Match automatically",
+            Msg::AutoMatch(Box::new(view.item.clone())),
+        ),
+        "Matches every season of this title again and replaces its current matches",
+    )]
+    .spacing(theme::S2)
+    .align_y(Center);
     if let Some(first) = current.first() {
         let remove = match view.scope.0 {
             Some(season) => Msg::UnmapSeason(view.item.id.clone(), season),

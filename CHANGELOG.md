@@ -4,6 +4,10 @@ All notable changes to Musubi are documented here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Added
+
+- **Match automatically.** The change dialog of a title has a *Match automatically* button that hands the title back to the automatic rules and replaces its current matches, manual ones included.
+
 ### Fixed
 
 - **The newest season no longer starts a few episodes late.** A season split over several AniList entries that is still missing its latest episodes was mistaken for one whose episode 0 lives under Specials, and its first episodes were skipped. That rule now only applies to a season that has a later season after it.
