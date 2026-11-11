@@ -2,11 +2,12 @@
 
 use std::fmt;
 
-use iced::widget::{column, container, pick_list, row, scrollable, text};
+use iced::widget::{column, container, pick_list, row, text};
 use iced::{Center, Element, Fill, Task};
 use musubi_core::{OutboxItem, SyncDirection, SyncLogEntry, SyncReport, SyncRow};
 
 use crate::app::{App, Message};
+use crate::icons::Icon;
 use crate::{theme, ui};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -127,27 +128,59 @@ pub fn update(app: &mut App, msg: Msg) -> Task<Message> {
     Task::none()
 }
 
+/// Stand eines Dienstes in der Farbe seiner Kordel.
+fn side<'a>(name: &'a str, value: String, cord: iced::Color) -> Element<'a, Msg> {
+    row![
+        container(iced::widget::Space::new())
+            .width(6)
+            .height(6)
+            .style(theme::solid(cord, 3.0)),
+        ui::muted(name),
+        text(value).size(theme::T_SMALL).font(theme::SEMIBOLD),
+    ]
+    .spacing(6)
+    .align_y(Center)
+    .into()
+}
+
 fn diff_row(index: usize, row_data: &SyncRow) -> Element<'_, Msg> {
     row![
         column![
-            text(ui::ellipsize(&row_data.media_title, 70)).size(15),
-            ui::muted(format!(
-                "Jellyfin {}  ·  AniList {}/{}",
-                row_data.jellyfin_progress,
-                row_data.anilist_progress,
-                row_data.total.map_or("?".to_owned(), |t| t.to_string())
-            )),
+            text(ui::ellipsize(&row_data.media_title, 70))
+                .size(theme::T_BODY)
+                .font(theme::MEDIUM),
+            row![
+                side(
+                    "Jellyfin",
+                    row_data.jellyfin_progress.to_string(),
+                    theme::WATCH
+                ),
+                side(
+                    "AniList",
+                    format!(
+                        "{} of {}",
+                        row_data.anilist_progress,
+                        row_data.total.map_or("?".to_owned(), |t| t.to_string())
+                    ),
+                    theme::TRACK
+                ),
+            ]
+            .spacing(theme::S4),
         ]
-        .spacing(2)
+        .spacing(theme::S1)
         .width(Fill),
         pick_list(
             DIRECTIONS,
             Some(DirectionOption(row_data.direction)),
             move |d| Msg::Direction(index, d)
         )
-        .text_size(13)
-        .padding([6, 10]),
+        .text_size(theme::T_SMALL)
+        .padding([7, 12])
+        .style(theme::pick)
+        .menu_style(theme::pick_menu),
     ]
+    .spacing(theme::S3)
+    .padding([theme::S2, theme::S2])
     .align_y(Center)
     .into()
 }
@@ -158,6 +191,14 @@ fn when(timestamp: i64) -> String {
         .unwrap_or_default()
 }
 
+fn group<'a>(rows: Vec<Element<'a, Msg>>) -> Element<'a, Msg> {
+    container(ui::divided(rows))
+        .padding([theme::S1, theme::S2])
+        .width(Fill)
+        .style(theme::surface)
+        .into()
+}
+
 pub fn view(app: &App) -> Element<'_, Message> {
     let state = &app.sync;
     let diff: Vec<Element<'_, Msg>> = state
@@ -166,59 +207,129 @@ pub fn view(app: &App) -> Element<'_, Message> {
         .enumerate()
         .map(|(i, r)| diff_row(i, r))
         .collect();
-    let pending = state.pending.iter().map(|item| {
-        let details = format!(
-            "{} attempts{}",
-            item.attempts,
-            item.last_error
-                .as_deref()
-                .map(|e| format!(": {e}"))
-                .unwrap_or_default()
-        );
-        column![
-            text(format!("Pending write for media {}", item.media_id)).size(14),
-            ui::muted(details),
-        ]
-        .spacing(2)
-        .into()
-    });
-    let log = state.log.iter().map(|entry| {
-        column![
-            text(ui::ellipsize(&entry.message, 110))
-                .size(14)
-                .color(if entry.ok { theme::TEXT } else { theme::RED }),
-            ui::muted(when(entry.at)),
-        ]
-        .spacing(2)
-        .into()
-    });
-    let summary: Element<'_, Msg> = if diff.is_empty() {
-        ui::muted(if state.busy {
-            "Comparing…"
-        } else {
-            "Jellyfin and AniList agree."
+    let pending: Vec<Element<'_, Msg>> = state
+        .pending
+        .iter()
+        .map(|item| {
+            let details = match (item.attempts, item.last_error.as_deref()) {
+                (0, _) => "Waiting to be sent".to_owned(),
+                (n, Some(error)) => format!("{n} attempts, last error: {error}"),
+                (n, None) => format!("{n} attempts"),
+            };
+            row![
+                ui::icon(Icon::Clock, 16.0, theme::WARN),
+                column![
+                    text(format!("Change for AniList entry {}", item.media_id))
+                        .size(theme::T_SMALL)
+                        .font(theme::MEDIUM),
+                    ui::muted(details),
+                ]
+                .spacing(2),
+            ]
+            .spacing(theme::S3)
+            .padding([theme::S2, theme::S2])
+            .align_y(Center)
+            .into()
         })
+        .collect();
+    let log: Vec<Element<'_, Msg>> = state
+        .log
+        .iter()
+        .map(|entry| {
+            let (glyph, color) = if entry.ok {
+                (Icon::Check, theme::OK)
+            } else {
+                (Icon::Close, theme::BAD)
+            };
+            row![
+                ui::icon(glyph, 14.0, color),
+                text(ui::ellipsize(&entry.message, 110))
+                    .size(theme::T_SMALL)
+                    .color(if entry.ok { theme::PAPER } else { theme::BAD })
+                    .width(Fill),
+                ui::muted(when(entry.at)),
+            ]
+            .spacing(theme::S3)
+            .padding([7.0, theme::S2])
+            .align_y(Center)
+            .into()
+        })
+        .collect();
+    let changes = diff.len();
+    let summary: Element<'_, Msg> = if !diff.is_empty() {
+        group(diff)
+    } else if state.busy {
+        container(ui::muted("Comparing Jellyfin and AniList…"))
+            .padding(theme::S4)
+            .width(Fill)
+            .style(theme::surface)
+            .into()
     } else {
-        column(diff).spacing(10).into()
+        container(
+            row![
+                ui::icon(Icon::Knot, 20.0, theme::TRACK),
+                text("Jellyfin and AniList agree.").size(theme::T_BODY),
+            ]
+            .spacing(theme::S3)
+            .align_y(Center),
+        )
+        .padding(theme::S4)
+        .width(Fill)
+        .style(theme::surface)
+        .into()
     };
-    let body = column![
-        row![
-            ui::heading("Sync"),
-            ui::spacer(),
-            ui::secondary("Retry queue", Msg::Flush),
-            ui::secondary("Compare again", Msg::Reload),
-            ui::primary("Apply", Msg::Apply),
-        ]
-        .spacing(8)
-        .align_y(Center),
-        ui::card(summary),
-        text("Queue and history").size(16),
-        ui::card(column(pending.chain(log)).spacing(10)),
+    let mut body = column![
+        ui::page_header(
+            "Sync",
+            Some(
+                "Compare what you watched in Jellyfin with your AniList progress and choose which side wins for each title."
+                    .to_owned()
+            ),
+            vec![
+                ui::tool(
+                    Icon::Sync,
+                    "Compare again",
+                    Some(Msg::Reload),
+                    theme::secondary,
+                    theme::PAPER
+                ),
+                ui::tool(
+                    Icon::Check,
+                    "Apply changes",
+                    (changes > 0 && !state.busy).then_some(Msg::Apply),
+                    theme::track,
+                    theme::INK
+                ),
+            ],
+        ),
+        ui::section(ui::heading_count("Differences", changes), summary),
     ]
-    .spacing(18)
-    .padding(iced::padding::right(14));
-    let page: Element<'_, Msg> = container(scrollable(body).width(Fill).height(Fill))
-        .padding(24)
-        .into();
+    .spacing(theme::S5)
+    .padding(iced::Padding {
+        top: theme::S5,
+        right: ui::PAGE_PADDING,
+        bottom: theme::S6,
+        left: ui::PAGE_PADDING,
+    });
+    if !pending.is_empty() {
+        let count = pending.len();
+        body = body.push(ui::section(
+            row![
+                ui::heading_count("Waiting to be sent", count),
+                ui::spacer(),
+                ui::quiet("Retry now", Msg::Flush)
+            ]
+            .align_y(Center)
+            .into(),
+            group(pending),
+        ));
+    }
+    let history: Element<'_, Msg> = if log.is_empty() {
+        ui::muted("Nothing synced yet.")
+    } else {
+        group(log)
+    };
+    body = body.push(ui::section(ui::heading("History"), history));
+    let page: Element<'_, Msg> = ui::scroll(body);
     page.map(Message::Sync)
 }
