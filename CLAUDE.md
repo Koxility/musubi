@@ -41,6 +41,7 @@ For GUI changes, also look at the result: run the demo backend (`docs/DEVELOPMEN
 - Commit subject: imperative, capitalised, no trailing period, up to ~60 characters ("Add the Profile page"). Body says what changed and why, wrapped at 72.
 - One topic per commit. Keep the default branch `master` releasable; work on a branch and merge through a pull request.
 - A user-visible change adds a line to the `[Unreleased]` section of `CHANGELOG.md`.
+- PR descriptions end with their last line of content; leave out the "Generated with Claude Code" footer and its session link.
 - Update `README.md` (shortcuts) and `docs/` in the same change when behaviour they describe changes.
 
 ## Releasing
