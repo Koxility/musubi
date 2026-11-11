@@ -222,6 +222,27 @@ impl Db {
         .await
     }
 
+    /// The Jellyfin title mapped to this AniList entry, with the season when the entry
+    /// belongs to exactly one.
+    pub async fn jellyfin_for_media(
+        &self,
+        media_id: i64,
+    ) -> Result<Option<(String, Option<u32>)>, DbError> {
+        self.call(move |c| {
+            Ok(c.query_row(
+                "SELECT jellyfin_id, MIN(season), COUNT(DISTINCT season)
+                 FROM mappings WHERE media_id = ?1 GROUP BY jellyfin_id ORDER BY 2 LIMIT 1",
+                [media_id],
+                |row| {
+                    let seasons: u32 = row.get(2)?;
+                    Ok((row.get(0)?, (seasons == 1).then(|| row.get(1)).transpose()?))
+                },
+            )
+            .optional()?)
+        })
+        .await
+    }
+
     pub async fn mappings_for(&self, jellyfin_id: &str) -> Result<Vec<Mapping>, DbError> {
         let id = jellyfin_id.to_owned();
         self.call(move |c| {
@@ -610,6 +631,31 @@ mod tests {
         assert!(db.outbox_due(1000).await.unwrap().is_empty());
         db.outbox_reset_failed().await.unwrap();
         assert_eq!(db.outbox_due(0).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn an_entry_leads_back_to_its_title_and_single_season() {
+        let db = Db::open_in_memory().unwrap();
+        let mapping = |season: u32, media_id: i64| Mapping {
+            jellyfin_id: "a".into(),
+            season,
+            ep_start: 1,
+            ep_end: None,
+            media_id,
+            offset: 0,
+            source: MappingSource::Manual,
+            confidence: 1.0,
+            title: "A".into(),
+        };
+        db.replace_mappings("a", vec![mapping(1, 5), mapping(2, 5), mapping(3, 6)])
+            .await
+            .unwrap();
+        // Entry 5 spans two seasons, so no single season stands for it.
+        let found = db.jellyfin_for_media(5).await.unwrap();
+        assert_eq!(found, Some(("a".to_owned(), None)));
+        let found = db.jellyfin_for_media(6).await.unwrap();
+        assert_eq!(found, Some(("a".to_owned(), Some(3))));
+        assert_eq!(db.jellyfin_for_media(7).await.unwrap(), None);
     }
 
     #[tokio::test]

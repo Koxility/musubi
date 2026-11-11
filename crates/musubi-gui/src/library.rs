@@ -244,6 +244,15 @@ pub fn open_detail(app: &mut App, item: LibraryItem) -> Task<Message> {
     }
 }
 
+/// Opens the detail page with `season` selected, for callers that know which one they mean.
+pub fn open_detail_at(app: &mut App, item: LibraryItem, season: Option<u32>) -> Task<Message> {
+    let task = open_detail(app, item);
+    if let Some(detail) = &mut app.library.detail {
+        detail.season = season;
+    }
+    task
+}
+
 pub fn update(app: &mut App, msg: Msg) -> Task<Message> {
     match msg {
         Msg::WantImage(key) => return app.want_image(key),
@@ -922,11 +931,47 @@ fn season_tabs(detail: &Detail) -> Element<'_, Msg> {
     )
 }
 
-/// Streifen mit dem Stand auf AniList und den Aktionen dazu.
+/// Adds a line for every AniList entry after the first one: a season can be split over
+/// several entries, and the strip would otherwise hide all but the first.
+fn further_entries<'a>(
+    app: &App,
+    mut lines: iced::widget::Column<'a, Msg>,
+    mappings: &[&Mapping],
+) -> iced::widget::Column<'a, Msg> {
+    let mut seen = vec![mappings.first().map(|m| m.media_id)];
+    for mapping in mappings.iter().skip(1) {
+        if seen.contains(&Some(mapping.media_id)) {
+            continue;
+        }
+        seen.push(Some(mapping.media_id));
+        let range = match mapping.ep_end {
+            Some(end) => format!("Ep {}–{end}", mapping.ep_start),
+            None => format!("From ep {}", mapping.ep_start),
+        };
+        let progress = match app.core.entry_for(mapping.media_id) {
+            Some(entry) => format!(
+                "{} of {}",
+                entry.progress,
+                entry
+                    .media
+                    .total_units()
+                    .map_or("?".to_owned(), |t| t.to_string())
+            ),
+            None => "not on your AniList yet".to_owned(),
+        };
+        lines = lines.push(ui::muted(format!(
+            "{range} · {} · {progress}",
+            ui::ellipsize(&mapping.title, 40)
+        )));
+    }
+    lines
+}
+
+/// Strip with the state on AniList and the actions for it.
 fn anilist_summary<'a>(app: &'a App, item: &'a LibraryItem) -> Element<'a, Msg> {
     let row_data = app.library.rows.iter().find(|r| r.item.id == item.id);
     let season = selected_season(app, &item.id);
-    // Jede Staffel hat ihren eigenen AniList-Eintrag, gezeigt wird der der gewählten Staffel.
+    // Every season has its own AniList entries; the strip shows those of the selected season.
     let season_maps: Vec<&Mapping> = row_data
         .map(|r| match season {
             Some(season) => season_mappings(&r.mappings, season),
@@ -974,7 +1019,8 @@ fn anilist_summary<'a>(app: &'a App, item: &'a LibraryItem) -> Element<'a, Msg> 
                     viewer.score_format.display(entry.score_raw)
                 )));
             }
-            summary = summary.push(
+            summary = summary.push(further_entries(
+                app,
                 column![
                     text(ui::ellipsize(&mapping.title, 48))
                         .size(theme::T_BODY)
@@ -982,10 +1028,12 @@ fn anilist_summary<'a>(app: &'a App, item: &'a LibraryItem) -> Element<'a, Msg> 
                     facts,
                 ]
                 .spacing(3),
-            );
+                &season_maps,
+            ));
         }
         (Some(mapping), None) => {
-            summary = summary.push(
+            summary = summary.push(further_entries(
+                app,
                 column![
                     text(ui::ellipsize(&mapping.title, 48))
                         .size(theme::T_BODY)
@@ -993,7 +1041,8 @@ fn anilist_summary<'a>(app: &'a App, item: &'a LibraryItem) -> Element<'a, Msg> 
                     ui::muted("Not on your AniList yet"),
                 ]
                 .spacing(3),
-            );
+                &season_maps,
+            ));
         }
         (None, _) => {
             let partly = season.is_some() && row_data.is_some_and(|r| !r.mappings.is_empty());

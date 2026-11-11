@@ -1,7 +1,9 @@
 //! Home in the style of a media centre: a large hero and shelves.
 
+use std::time::{Duration, Instant};
+
 use iced::widget::{Space, button, center, column, container, hover, responsive, row, stack, text};
-use iced::{Center, Element, Fill, Padding, Size, Task};
+use iced::{Center, Element, Fill, Padding, Size, Subscription, Task, mouse};
 use musubi_core::HomeShelves;
 use musubi_core::domain::{LibraryItem, ShelfItem};
 
@@ -34,10 +36,37 @@ fn hero_height(page: Size) -> f32 {
         .max(HERO_MIN)
 }
 
+/// The pointer must travel this far before a press is a drag and not a click on a card.
+const DRAG_THRESHOLD: f32 = 6.0;
+/// Seconds in which a glide covers about two thirds of what is left of it.
+const GLIDE_TAU: f32 = 0.12;
+/// A flick carries the shelf on by this many seconds of its speed.
+const FLICK: f32 = 0.3;
+const FLICK_MAX: f32 = 2400.0;
+/// A pointer that rested this long before the release was placed, not flicked.
+const REST: Duration = Duration::from_millis(80);
+
+/// A shelf held with the mouse button.
+struct Drag {
+    shelf: &'static str,
+    /// Pointer position and time of the last movement; `None` until the first one.
+    last: Option<(f32, Instant)>,
+    travelled: f32,
+    /// Pixels per second, smoothed.
+    velocity: f32,
+}
+
 #[derive(Default)]
 pub struct State {
     shelves: HomeShelves,
     loading: bool,
+    /// The shelf under the pointer.
+    hovered: Option<&'static str>,
+    drag: Option<Drag>,
+    /// The last press turned into a drag, so the click that ends it must not open a card.
+    dragged: bool,
+    /// A shelf easing towards its target and the distance it still has to go.
+    glide: Option<(&'static str, f32)>,
 }
 
 #[derive(Debug, Clone)]
@@ -51,6 +80,76 @@ pub enum Msg {
     Opened(u64, Result<LibraryItem, String>),
     /// Scrolls a shelf sideways.
     Scroll(&'static str, f32),
+    /// The pointer entered a shelf, or left it.
+    Hover(Option<&'static str>),
+    Pressed,
+    /// The pointer's horizontal position while a shelf is held.
+    Moved(f32),
+    Released,
+}
+
+fn on_press(event: iced::Event, _: iced::event::Status, _: iced::window::Id) -> Option<Message> {
+    matches!(
+        event,
+        iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
+    )
+    .then_some(Message::Home(Msg::Pressed))
+}
+
+fn on_drag(event: iced::Event, _: iced::event::Status, _: iced::window::Id) -> Option<Message> {
+    let iced::Event::Mouse(event) = event else {
+        return None;
+    };
+    let msg = match event {
+        mouse::Event::CursorMoved { position } => Msg::Moved(position.x),
+        mouse::Event::ButtonReleased(mouse::Button::Left) | mouse::Event::CursorLeft => {
+            Msg::Released
+        }
+        _ => return None,
+    };
+    Some(Message::Home(msg))
+}
+
+/// Raw pointer events for dragging a shelf. Cards are buttons and swallow the press, so a
+/// widget around them never sees it. Movement is only listened to while a shelf is held.
+pub fn subscription(state: &State) -> Subscription<Message> {
+    if state.drag.is_some() {
+        iced::event::listen_with(on_drag)
+    } else if state.hovered.is_some() {
+        iced::event::listen_with(on_press)
+    } else {
+        Subscription::none()
+    }
+}
+
+/// How far a glide with `pending` pixels left moves within `dt`: fast first, then settling.
+fn glide_step(pending: f32, dt: Duration) -> f32 {
+    pending * (1.0 - (-dt.as_secs_f32() / GLIDE_TAU).exp())
+}
+
+/// Sends a shelf on its way by `distance` pixels, on top of what it still has to go.
+fn glide(app: &mut App, shelf: &'static str, distance: f32) {
+    let pending = match app.home.glide {
+        Some((gliding, pending)) if gliding == shelf => pending,
+        _ => 0.0,
+    };
+    app.home.glide = Some((shelf, pending + distance));
+    app.frame = Instant::now();
+}
+
+pub fn gliding(state: &State) -> bool {
+    state.glide.is_some()
+}
+
+/// Moves a gliding shelf on by one frame.
+pub fn frame(app: &mut App, dt: Duration) -> Task<Message> {
+    let Some((shelf, pending)) = app.home.glide else {
+        return Task::none();
+    };
+    let step = glide_step(pending, dt);
+    let left = pending - step;
+    app.home.glide = (left.abs() > 0.5).then_some((shelf, left));
+    ui::scroll_shelf(shelf, step)
 }
 
 pub fn load(app: &mut App) -> Task<Message> {
@@ -58,6 +157,9 @@ pub fn load(app: &mut App) -> Task<Message> {
         return Task::none();
     }
     app.home.loading = true;
+    // The pointer may be anywhere by now; the shelf reports itself again when it is over one.
+    app.home.hovered = None;
+    app.home.drag = None;
     let core = app.core.clone();
     ui::perform(async move { core.home().await }, |r| {
         Message::Home(Msg::Loaded(r))
@@ -74,6 +176,7 @@ pub fn update(app: &mut App, msg: Msg) -> Task<Message> {
                 Err(error) => app.toast(error, false),
             }
         }
+        Msg::Play(_) | Msg::Open(_) if app.home.dragged => {}
         Msg::Play(item) => {
             let core = app.core.clone();
             return ui::perform(
@@ -95,11 +198,59 @@ pub fn update(app: &mut App, msg: Msg) -> Task<Message> {
         }
         Msg::Opened(generation, _) if generation != app.nav_generation => {}
         Msg::Opened(_, Ok(item)) if app.page == Page::Home => {
+            app.home.hovered = None;
             return library::open_detail(app, item);
         }
         Msg::Opened(_, Ok(_)) => {}
         Msg::Opened(_, Err(error)) => app.toast(error, false),
-        Msg::Scroll(id, step) => return ui::scroll_shelf(id, step),
+        Msg::Scroll(id, step) => glide(app, id, step),
+        Msg::Hover(shelf) => {
+            app.home.hovered = shelf;
+            if shelf.is_none() && app.home.drag.is_none() {
+                app.home.dragged = false;
+            }
+        }
+        Msg::Pressed => {
+            if let Some(shelf) = app.home.hovered {
+                app.home.dragged = false;
+                // Grabbing a shelf stops it.
+                app.home.glide = None;
+                app.home.drag = Some(Drag {
+                    shelf,
+                    last: None,
+                    travelled: 0.0,
+                    velocity: 0.0,
+                });
+            }
+        }
+        Msg::Moved(x) => {
+            let Some(drag) = &mut app.home.drag else {
+                return Task::none();
+            };
+            let now = Instant::now();
+            let Some((last_x, at)) = drag.last.replace((x, now)) else {
+                return Task::none();
+            };
+            // The cards follow the pointer, so the shelf scrolls the other way.
+            let dx = last_x - x;
+            let dt = now.duration_since(at).as_secs_f32().max(0.001);
+            drag.travelled += dx.abs();
+            drag.velocity = 0.6 * drag.velocity + 0.4 * dx / dt;
+            if drag.travelled > DRAG_THRESHOLD {
+                let shelf = drag.shelf;
+                app.home.dragged = true;
+                return ui::scroll_shelf(shelf, dx);
+            }
+        }
+        Msg::Released => {
+            if let Some(drag) = app.home.drag.take()
+                && app.home.dragged
+                && drag.last.is_some_and(|(_, at)| at.elapsed() < REST)
+            {
+                let flick = (drag.velocity * FLICK).clamp(-FLICK_MAX, FLICK_MAX);
+                glide(app, drag.shelf, flick);
+            }
+        }
     }
     Task::none()
 }
@@ -316,6 +467,7 @@ fn page(app: &App, size: Size) -> Element<'_, Msg> {
         items.iter().map(|i| wide_card(app, i)).collect()
     };
     let scroll: fn(&'static str, f32) -> Msg = Msg::Scroll;
+    let hover: fn(Option<&'static str>) -> Msg = Msg::Hover;
     if !shelves.continue_watching.is_empty() {
         content = content.push(ui::shelf(
             "Continue watching",
@@ -324,6 +476,7 @@ fn page(app: &App, size: Size) -> Element<'_, Msg> {
             SHELF_PADDING,
             CARD_PADDING,
             scroll,
+            hover,
         ));
     }
     if !shelves.next_up.is_empty() {
@@ -334,6 +487,7 @@ fn page(app: &App, size: Size) -> Element<'_, Msg> {
             SHELF_PADDING,
             CARD_PADDING,
             scroll,
+            hover,
         ));
     }
     if !shelves.latest.is_empty() {
@@ -345,6 +499,7 @@ fn page(app: &App, size: Size) -> Element<'_, Msg> {
             SHELF_PADDING,
             CARD_PADDING,
             scroll,
+            hover,
         ));
     }
     ui::scroll(content.padding(iced::padding::bottom(theme::S6)))
@@ -368,5 +523,25 @@ mod tests {
         assert_eq!(hero_height(Size::new(1600.0, 800.0)), 544.0);
         // A tiny window still gets a usable hero.
         assert_eq!(hero_height(Size::new(500.0, 300.0)), HERO_MIN);
+    }
+
+    #[test]
+    fn a_glide_starts_fast_settles_and_covers_its_distance() {
+        let frame = Duration::from_millis(16);
+        let mut pending = 820.0_f32;
+        let first = glide_step(pending, frame);
+        let mut frames = 0;
+        while pending.abs() > 0.5 {
+            let step = glide_step(pending, frame);
+            assert!(step <= first && step > 0.0);
+            pending -= step;
+            frames += 1;
+        }
+        // Done in well under a second at 60 frames per second, without overshooting.
+        assert!((20..60).contains(&frames), "{frames} frames");
+        assert!(pending >= 0.0);
+        // A long frame never jumps past the target, and a backwards glide mirrors it.
+        assert!(glide_step(820.0, Duration::from_secs(5)) <= 820.0);
+        assert_eq!(glide_step(-820.0, frame), -first);
     }
 }

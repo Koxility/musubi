@@ -4,6 +4,19 @@ All notable changes to Musubi are documented here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-11
+
+### Added
+
+- **Several AniList entries per season, by hand.** The change dialog for a season lists each of its entries with its own *Edit…* and has *Add entry…* for another one. A title's page shows every entry of the selected season, not only the first.
+- **Collapsible sidebar.** The menu button next to the logo, or `Ctrl+B`, hides the navigation and gives the page the full width; the button stays in the corner to bring it back. Musubi remembers the choice.
+- **Jump from AniList to the show.** Clicking a cover on the AniList overview (Airing and in progress) opens the matched title from your Jellyfin library, on the season the entry belongs to. Editing the entry moved to the ⋯ button in the top-left corner of the cover; titles that are not in your library still open the editor.
+
+### Changed
+
+- **Home feels more fluid.** The rows scroll by dragging the cards with the mouse, and a flick carries them on; the arrows glide instead of jumping. Covers fade in as they load and pages fade in when you switch.
+- **Smarter matching of long and split series.** One AniList entry now continues across as many Jellyfin seasons as it has episodes for, even when the metadata plugin wrote other IDs on those seasons, so a classic run split into many seasons maps to its single entry and the sequels follow after it. A season split over several AniList entries skips an episode 0 that Jellyfin keeps under Specials instead of counting every episode one too low. Automatic matches of multi-season series are re-planned once on the next start; manual ones stay.
+
 ## [0.3.0] - 2026-11-11
 
 ### Added
@@ -83,6 +96,7 @@ First release.
 - Playback needs GStreamer with `gst-plugins-base`, `-good`, `-bad` and `gst-libav`.
 - You need your own AniList client ID; see the README.
 
+[0.4.0]: https://github.com/Koxility/musubi/releases/tag/v0.4.0
 [0.3.0]: https://github.com/Koxility/musubi/releases/tag/v0.3.0
 [0.2.0]: https://github.com/Koxility/musubi/releases/tag/v0.2.0
 [0.1.1]: https://github.com/Koxility/musubi/releases/tag/v0.1.1

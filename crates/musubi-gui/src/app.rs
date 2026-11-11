@@ -3,10 +3,11 @@
 use std::hash::{Hash, Hasher};
 use std::time::{Duration, Instant};
 
+use iced::animation::Easing;
 use iced::keyboard::{self, Key, key::Named};
 use iced::widget::image::Handle;
 use iced::widget::{Space, button, column, container, row, stack, text};
-use iced::{Center, Color, Element, Fill, Subscription, Task, Theme};
+use iced::{Animation, Center, Color, Element, Fill, Subscription, Task, Theme};
 use musubi_core::domain::MediaKind;
 use musubi_core::{AuthStatus, Config, Core, CoreEvent, PlayerCommand, Service};
 use tokio::sync::broadcast;
@@ -21,8 +22,11 @@ const TOAST_SECONDS: u64 = 5;
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Git-Stand dieses Builds, gesetzt von `build.rs`.
 pub const COMMIT: &str = env!("MUSUBI_COMMIT");
-/// Breite der Seitenleiste.
+/// Width of the navigation rail.
 const RAIL_WIDTH: f32 = 216.0;
+const MENU_ICON: f32 = 18.0;
+/// Width of what is left of a hidden rail: the menu button and the rail's side padding.
+const RAIL_HIDDEN: f32 = MENU_ICON * 1.8 + 2.0 * theme::S2;
 const SEEK_STEP: f64 = 10.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,8 +73,9 @@ const RAIL: [RailGroup; 3] = [
     ),
 ];
 
-const SHORTCUTS: [(&str, &str); 11] = [
+const SHORTCUTS: [(&str, &str); 12] = [
     ("Ctrl+1 to 7", "Switch page"),
+    ("Ctrl+B", "Show or hide the sidebar"),
     ("Ctrl+R", "Refresh"),
     (
         "Space, Left / Right, F, M",
@@ -94,6 +99,9 @@ pub enum Message {
     Tick,
     Escape,
     ToggleHelp,
+    ToggleSidebar,
+    /// A frame of a running animation.
+    Frame(Instant),
     Core(CoreEvent),
     ImageLoaded(ImageKey, Result<Handle, String>),
     Notify(Result<(), String>),
@@ -133,6 +141,12 @@ pub struct App {
     view_epoch: u64,
     toast: Option<(String, bool, Instant)>,
     help: bool,
+    /// Time of the last animation frame; every animated value is read at this instant.
+    pub frame: Instant,
+    /// Whether the navigation rail is shown; animates its width.
+    rail: Animation<bool>,
+    /// When the visible view last changed; it fades in from then.
+    view_changed_at: Instant,
 }
 
 /// Macht den Kern zum Schlüssel einer Subscription. Es gibt immer genau einen.
@@ -195,6 +209,7 @@ fn on_key(event: keyboard::Event) -> Option<Message> {
         }
         Key::Character(c) if modifiers.control() => match c {
             "r" => Some(Message::Refresh),
+            "b" => Some(Message::ToggleSidebar),
             "p" => player(PlayerCommand::TogglePause),
             "." => player(PlayerCommand::Next),
             "," => player(PlayerCommand::Previous),
@@ -246,6 +261,11 @@ impl App {
             view_epoch: 0,
             toast: None,
             help: false,
+            frame: Instant::now(),
+            view_changed_at: Instant::now(),
+            rail: Animation::new(!config.ui.sidebar_collapsed)
+                .duration(theme::MOTION)
+                .easing(Easing::EaseOutCubic),
             auth,
             config,
             core,
@@ -275,7 +295,32 @@ impl App {
             keyboard::listen().filter_map(on_key),
             iced::time::every(Duration::from_secs(1)).map(|_| Message::Tick),
             video::subscription(&self.video, self.video_link.as_ref()),
+            if self.page == Page::Home && !self.video.is_active() {
+                home::subscription(&self.home)
+            } else {
+                Subscription::none()
+            },
+            if self.animating() {
+                iced::window::frames().map(Message::Frame)
+            } else {
+                Subscription::none()
+            },
         ])
+    }
+
+    /// Whether anything on screen is in motion. Frames are only requested meanwhile, so an
+    /// idle window costs nothing.
+    fn animating(&self) -> bool {
+        self.rail.is_animating(self.frame)
+            || self.images.fading()
+            || home::gliding(&self.home)
+            || self.frame.saturating_duration_since(self.view_changed_at) < theme::FADE
+    }
+
+    /// Starts the fade-in of a view that just became visible.
+    fn fade_view(&mut self) {
+        self.frame = Instant::now();
+        self.view_changed_at = self.frame;
     }
 
     fn load_everything(&mut self) -> Task<Message> {
@@ -367,6 +412,7 @@ impl App {
         self.page = page;
         self.nav_generation += 1;
         self.view_epoch += 1;
+        self.fade_view();
         self.library.detail = None;
         self.anilist.close_modal();
         self.mapping.close_modal();
@@ -399,12 +445,14 @@ impl App {
     pub fn close_detail(&mut self) {
         if self.library.detail.take().is_some() {
             self.view_epoch += 1;
+            self.fade_view();
         }
     }
 
     /// Meldet eine neu geöffnete Ansicht, z. B. eine Detailseite.
     pub fn view_changed(&mut self) {
         self.view_epoch += 1;
+        self.fade_view();
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
@@ -433,6 +481,18 @@ impl App {
             }
             Message::Escape => self.on_escape(),
             Message::ToggleHelp => self.help = !self.help,
+            Message::ToggleSidebar => {
+                let shown = !self.rail.value();
+                self.frame = Instant::now();
+                self.rail.go_mut(shown, self.frame);
+                self.remember(|config| config.ui.sidebar_collapsed = !shown);
+            }
+            Message::Frame(at) => {
+                let dt = at.saturating_duration_since(self.frame);
+                self.frame = at;
+                self.images.tick(at);
+                return home::frame(self, dt);
+            }
             Message::Core(event) => return self.on_core_event(event),
             Message::ImageLoaded(key, result) => self.images.loaded(key, result),
             Message::Notify(result) => self.report(result),
@@ -525,8 +585,24 @@ impl App {
         .into()
     }
 
+    fn menu_button(&self) -> Element<'_, Message> {
+        ui::icon_button(
+            Icon::Menu,
+            MENU_ICON,
+            theme::MUTED,
+            Some(Message::ToggleSidebar),
+            if self.rail.value() {
+                "Hide sidebar (Ctrl+B)"
+            } else {
+                "Show sidebar (Ctrl+B)"
+            },
+            theme::quiet,
+        )
+    }
+
     fn navigation(&self) -> Element<'_, Message> {
         let brand = row![
+            self.menu_button(),
             logo::mark(38.0),
             text("Musubi")
                 .size(theme::T_TITLE)
@@ -582,7 +658,8 @@ impl App {
                     top: theme::S2,
                     right: 0.0,
                     bottom: theme::S3,
-                    left: theme::S4 - 1.0,
+                    // The menu button keeps its place when the rail hides.
+                    left: 0.0,
                 }),
                 groups,
                 Space::new().height(Fill),
@@ -602,6 +679,28 @@ impl App {
         .width(RAIL_WIDTH)
         .height(Fill)
         .style(theme::rail);
+        // Hidden, only the menu button is left. On the way there the full rail slides out
+        // of a narrowing window, so nothing reflows.
+        let rail: Element<'_, Message> = if self.rail.value() || self.rail.is_animating(self.frame)
+        {
+            container(rail)
+                .width(self.rail.interpolate(RAIL_HIDDEN, RAIL_WIDTH, self.frame))
+                .clip(true)
+                .into()
+        } else {
+            container(self.menu_button())
+                .padding(iced::Padding {
+                    // Where the button sits in the open rail: centred on the logo.
+                    top: theme::S4 + theme::S2 + 3.0,
+                    right: theme::S2,
+                    bottom: theme::S4,
+                    left: theme::S2,
+                })
+                .width(RAIL_HIDDEN)
+                .height(Fill)
+                .style(theme::rail)
+                .into()
+        };
         row![
             rail,
             container(Space::new())
@@ -620,9 +719,11 @@ impl App {
             .is_some_and(|d| d.origin == self.page && d.opened_at == self.nav_generation)
     }
 
-    /// Die aktuelle Seite. Iced übernimmt Widget-Zustand wie die Scroll-Position, solange an
-    /// derselben Stelle derselbe Widget-Typ steht. Mit jedem Ansichtswechsel wechselt deshalb
-    /// die Verschachtelungstiefe, und die neue Ansicht beginnt garantiert oben und frisch.
+    /// The current page. Iced keeps widget state such as the scroll position as long as the
+    /// same widget type sits in the same place. So the nesting depth changes with every view
+    /// change, and the new view is sure to start fresh and at the top. A veil in the page
+    /// colour lies over it and clears while the view fades in; it is always there, because
+    /// adding and removing it would itself reset the page's state.
     fn page_view(&self) -> Element<'_, Message> {
         let content = self.page_content();
         let content = if self.view_epoch.is_multiple_of(2) {
@@ -630,12 +731,22 @@ impl App {
         } else {
             container(content).width(Fill).height(Fill).into()
         };
-        container(content).width(Fill).height(Fill).into()
+        let veil = 1.0 - theme::fade_in(self.frame.saturating_duration_since(self.view_changed_at));
+        stack![
+            container(content).width(Fill).height(Fill),
+            container(Space::new())
+                .width(Fill)
+                .height(Fill)
+                .style(theme::veil(veil))
+        ]
+        .into()
     }
 
     fn page_content(&self) -> Element<'_, Message> {
         match self.page {
-            Page::Home | Page::Library if self.shows_detail() => library::detail_view(self),
+            Page::Home | Page::Library | Page::AniList if self.shows_detail() => {
+                library::detail_view(self)
+            }
             Page::Home => home::view(self),
             Page::Library => library::view(self),
             Page::AniList => anilist::view(self),
@@ -743,6 +854,22 @@ mod tests {
             .await
             .unwrap();
         App::boot(core, None).0
+    }
+
+    #[tokio::test]
+    async fn hiding_the_sidebar_is_remembered() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = app(dir.path()).await;
+        assert!(app.rail.value());
+
+        let _ = app.update(Message::ToggleSidebar);
+
+        assert!(!app.rail.value());
+        assert!(app.animating());
+        assert!(app.core.config().ui.sidebar_collapsed);
+        let again = App::boot(app.core.clone(), None).0;
+        assert!(!again.rail.value());
+        assert!(!again.rail.is_animating(again.frame));
     }
 
     fn show() -> LibraryItem {

@@ -154,6 +154,8 @@ pub struct UiConfig {
     pub library: ViewConfig,
     /// The AniList lists. They start as a list, because that view shows score and notes.
     pub anilist: ViewConfig,
+    /// The navigation rail is hidden; only its menu button stays.
+    pub sidebar_collapsed: bool,
 }
 
 impl Default for UiConfig {
@@ -165,6 +167,7 @@ impl Default for UiConfig {
                 mode: ViewMode::List,
                 size: ViewSize::Medium,
             },
+            sidebar_collapsed: false,
         }
     }
 }

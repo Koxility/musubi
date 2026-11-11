@@ -3,8 +3,8 @@
 use iced::widget::scrollable::{Direction, Scrollbar};
 use iced::widget::tooltip::Position;
 use iced::widget::{
-    Column, Row, Space, button, center, column, container, image, opaque, pick_list, progress_bar,
-    row, scrollable, sensor, space, stack, svg, text, text_input, toggler, tooltip,
+    Column, Row, Space, button, center, column, container, image, mouse_area, opaque, pick_list,
+    progress_bar, row, scrollable, sensor, space, stack, svg, text, text_input, toggler, tooltip,
 };
 use iced::{Center, Color, ContentFit, Element, Fill, FillPortion, Length, Padding, Task};
 
@@ -516,6 +516,7 @@ pub fn picture<'a, M: Clone + 'a>(
     let content: Element<'a, M> = match images.get(&key) {
         Some(handle) => {
             let picture = image(handle.clone())
+                .opacity(images.opacity(&key))
                 .width(width)
                 .height(height)
                 .content_fit(ContentFit::Cover)
@@ -608,9 +609,10 @@ pub fn section<'a, M: 'a>(
     column![title, content.into()].spacing(S3).into()
 }
 
-/// Horizontal row of cards. It scrolls with a touchpad swipe, Shift and the mouse wheel,
-/// the thin bar below the cards, and the arrows in its header, because a plain mouse wheel
-/// only scrolls the page.
+/// Horizontal row of cards. It scrolls by dragging the cards, with a touchpad swipe, Shift
+/// and the mouse wheel, the thin bar below the cards, and the arrows in its header, because
+/// a plain mouse wheel only scrolls the page. `on_hover` reports the shelf under the pointer;
+/// the page needs it to know which shelf a drag belongs to.
 pub fn shelf<'a, M: Clone + 'a>(
     title: &'a str,
     id: &'static str,
@@ -618,6 +620,7 @@ pub fn shelf<'a, M: Clone + 'a>(
     padding: Padding,
     card_inset: f32,
     on_scroll: fn(&'static str, f32) -> M,
+    on_hover: fn(Option<&'static str>) -> M,
 ) -> Element<'a, M> {
     let count = items.len();
     // Cards have their own inset; their picture should still line up with the heading.
@@ -661,11 +664,15 @@ pub fn shelf<'a, M: Clone + 'a>(
             .align_y(Center)
         )
         .padding(padding),
-        scrollable(container(row(items).spacing(S3)).padding(cards))
-            .id(id)
-            .direction(Direction::Horizontal(bar))
-            .style(theme::scroll)
-            .width(Fill),
+        mouse_area(
+            scrollable(container(row(items).spacing(S3)).padding(cards))
+                .id(id)
+                .direction(Direction::Horizontal(bar))
+                .style(theme::scroll)
+                .width(Fill)
+        )
+        .on_enter(on_hover(Some(id)))
+        .on_exit(on_hover(None)),
     ]
     .spacing(S2)
     .into()

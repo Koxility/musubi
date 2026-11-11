@@ -13,8 +13,9 @@ use musubi_store::{ReviewCandidate, ReviewItem};
 use crate::inner::now;
 use crate::library::LibraryRow;
 use crate::matching::{
-    Carry, ChainLink, MIN_GUESS, MatchQuery, SMALL_DRIFT, SeasonSpan, Verdict, needs_more,
-    plan_chain, plan_season, rank, search_terms, season_match_title, season_search_terms, verdict,
+    Carry, ChainLink, MIN_GUESS, MatchQuery, SMALL_DRIFT, SeasonSpan, Verdict, leading_surplus,
+    needs_more, plan_chain, plan_season, rank, search_terms, season_match_title,
+    season_search_terms, verdict,
 };
 use crate::{Core, CoreEvent, Result};
 
@@ -31,16 +32,16 @@ const META_MATCHING_VERSION: &str = "matching_version";
 const META_TITLES_VERSION: &str = "mapping_titles_version";
 /// Version 1 stores the English title of a match where AniList has one, not the Romaji one.
 const TITLES_VERSION: u32 = 1;
-/// Version 2 ordnet jede Staffel einzeln zu. Ältere Zuordnungen werden einmal neu geplant.
-const MATCHING_VERSION: u32 = 2;
+/// Version 2 matches every season on its own. Version 3 lets one entry span seasons despite
+/// wrong season IDs and skips an episode 0 kept in Specials. Older automatic mappings are
+/// re-planned once.
+const MATCHING_VERSION: u32 = 3;
 
-static MATCH_RUNNING: AtomicBool = AtomicBool::new(false);
+struct MatchRunGuard<'a>(&'a AtomicBool);
 
-struct MatchRunGuard;
-
-impl Drop for MatchRunGuard {
+impl Drop for MatchRunGuard<'_> {
     fn drop(&mut self) {
-        MATCH_RUNNING.store(false, Ordering::SeqCst);
+        self.0.store(false, Ordering::SeqCst);
     }
 }
 
@@ -86,6 +87,24 @@ fn inherited(source: MappingSource, manual_run: bool) -> MappingSource {
         MappingSource::Manual if manual_run => MappingSource::Manual,
         _ => MappingSource::Title,
     }
+}
+
+/// The AniList or MyAnimeList ID a metadata plugin wrote on the season itself.
+fn season_provider_id(info: &SeasonInfo) -> Option<&str> {
+    let meta = info.meta.as_ref()?;
+    meta.provider_id(&["AniList"])
+        .or_else(|| meta.provider_id(&["MyAnimeList", "Mal"]))
+}
+
+/// Season IDs that occur on more than one season. An ID names one entry, so a repeated one
+/// was copied around by the plugin and says nothing about any of its seasons.
+fn repeated_season_ids(seasons: &[SeasonInfo]) -> HashSet<&str> {
+    let mut seen = HashSet::new();
+    seasons
+        .iter()
+        .filter_map(season_provider_id)
+        .filter(|id| !seen.insert(*id))
+        .collect()
 }
 
 fn spans(seasons: &[SeasonInfo]) -> Vec<SeasonSpan> {
@@ -185,22 +204,27 @@ impl Core {
         .await
     }
 
-    /// Provider-ID, die das Metadaten-Plugin an die Staffel selbst geschrieben hat.
+    /// The entry a metadata plugin named on the season itself, unless the ID is `repeated`
+    /// on other seasons or already taken.
     async fn season_provider_anchor(
         &self,
         info: &SeasonInfo,
         used: &HashSet<i64>,
+        repeated: &HashSet<&str>,
     ) -> Result<Option<Anchor>> {
         let Some(meta) = &info.meta else {
             return Ok(None);
         };
+        if season_provider_id(info).is_some_and(|id| repeated.contains(id)) {
+            return Ok(None);
+        }
         let media = self
             .media_by_ids(
                 meta.provider_id(&["AniList"]),
                 meta.provider_id(&["MyAnimeList", "Mal"]),
             )
             .await?;
-        // Manche Plugins kopieren die ID der Serie in jede Staffel. Die zählt hier nicht.
+        // Some plugins copy the series ID to every season. That one does not count here.
         Ok(media
             .filter(|m| !used.contains(&m.id))
             .map(|m| Anchor::new(&m, MappingSource::ProviderId, 1.0)))
@@ -302,8 +326,8 @@ impl Core {
         Ok(Some(Anchor::new(media, source, score.min(1.0))))
     }
 
-    /// Ordnet jede Staffel einzeln zu. Staffeln in `keep` bleiben unverändert und dienen der
-    /// nächsten Staffel als Ausgangspunkt. `start` gilt für die erste Staffel.
+    /// Matches every season on its own. Seasons in `keep` stay as they are and give the next
+    /// season its starting point. `start` applies to the first season.
     async fn plan_series(
         &self,
         item: &LibraryItem,
@@ -315,8 +339,13 @@ impl Core {
         let mut out: Vec<Mapping> = Vec::new();
         let mut used: HashSet<i64> = keep.iter().map(|m| m.media_id).collect();
         let mut carry: Option<Carry> = None;
-        // Letztes Werk der Vorstaffel mit Quelle und Sicherheit.
+        // Last entry of the previous season with its source and confidence.
         let mut previous: Option<(i64, MappingSource, f64)> = None;
+        let repeated = repeated_season_ids(seasons);
+        let specials = seasons
+            .iter()
+            .find(|s| s.span.season == 0)
+            .map_or(0, |s| s.span.count);
         let regular = seasons.iter().filter(|s| s.span.season > 0);
         for (index, info) in regular.enumerate() {
             let span = info.span;
@@ -340,22 +369,29 @@ impl Core {
             {
                 anchor = start.take();
             }
-            if anchor.is_none() {
-                anchor = self.season_provider_anchor(info, &used).await?;
-            }
-            if anchor.is_none() && index == 0 {
-                anchor = start.take();
-            }
-            if anchor.is_none()
-                && let Some(c) = carry.as_ref().filter(|c| c.continues_into(&span))
-                && let Some((_, source, confidence)) = previous
-            {
-                anchor = Some(Anchor {
+            let carried = |c: &Carry| {
+                previous.map(|(_, source, confidence)| Anchor {
                     link: c.link.clone(),
                     used: c.used,
                     source: inherited(source, manual_run),
                     confidence,
-                });
+                })
+            };
+            // An entry with room for the whole season goes on, whatever ID the season carries.
+            if anchor.is_none() {
+                anchor = carry.as_ref().filter(|c| c.fills(&span)).and_then(carried);
+            }
+            if anchor.is_none() {
+                anchor = self.season_provider_anchor(info, &used, &repeated).await?;
+            }
+            if anchor.is_none() && index == 0 {
+                anchor = start.take();
+            }
+            if anchor.is_none() {
+                anchor = carry
+                    .as_ref()
+                    .filter(|c| c.continues_into(&span))
+                    .and_then(carried);
             }
             if anchor.is_none()
                 && let Some((media_id, source, confidence)) = previous
@@ -371,8 +407,8 @@ impl Core {
                 anchor = self.search_season(item, info, &used).await?;
             }
             let Some(anchor) = anchor else {
-                // Nur diese Staffel bleibt offen. Die nächste sucht selbst, statt an einem
-                // falschen Vorgänger weiterzumachen.
+                // Only this season stays open. The next one searches for itself instead of
+                // continuing from a wrong predecessor.
                 carry = None;
                 previous = None;
                 continue;
@@ -380,17 +416,18 @@ impl Core {
 
             used.insert(anchor.link.media_id);
             let chain = self.season_chain(&anchor, span.count, &mut used).await?;
+            let skipped = leading_surplus(&chain, anchor.used, span.count, specials);
             let plan = plan_season(
                 &item.id,
                 &span,
                 &chain,
-                anchor.used,
+                anchor.used + skipped,
                 anchor.source,
                 anchor.confidence,
             );
             let mut source = anchor.source;
             let mut mappings = plan.mappings;
-            // Ein großer Rest ohne Werk heißt, dass etwas nicht zusammenpasst.
+            // Many episodes left without an entry mean that something does not fit.
             if plan.unmapped > SMALL_DRIFT && source != MappingSource::Manual {
                 source = MappingSource::Guess;
                 for mapping in &mut mappings {
@@ -636,21 +673,21 @@ impl Core {
             .unwrap_or(0))
     }
 
-    /// Ordnet alle noch offenen Titel zu. Läuft pro Prozess nur einmal gleichzeitig.
+    /// Matches all titles still open. Only one run at a time per core.
     ///
-    /// Titel ohne Treffer werden nur mit `retry_unmatched` erneut gesucht. Ohne Änderung bleibt
-    /// `LibraryChanged` aus, denn die Oberfläche startet diesen Lauf selbst. Nach einem Update
-    /// werden automatische Zuordnungen von Serien mit mehreren Staffeln einmal pro Staffel neu
-    /// geplant.
+    /// Titles without a match are only searched again with `retry_unmatched`. Without a change
+    /// there is no `LibraryChanged`, because the interface starts this run itself. After an
+    /// update, automatic mappings of series with several seasons are re-planned once, season
+    /// by season.
     pub async fn match_all(&self, retry_unmatched: bool) -> Result<()> {
         // Not worth failing the run for: offline, the titles are refreshed next time.
         if let Err(error) = self.refresh_mapping_titles().await {
             tracing::warn!(%error, "could not refresh the titles of matches");
         }
-        if MATCH_RUNNING.swap(true, Ordering::SeqCst) {
+        if self.inner.matching.swap(true, Ordering::SeqCst) {
             return Ok(());
         }
-        let _guard = MatchRunGuard;
+        let _guard = MatchRunGuard(&self.inner.matching);
         let rows = self.library(&LibraryQuery::default()).await?;
         let adopted = self.adopt_open_reviews(&rows).await?;
         let reviews = self.inner.db.reviews().await?;
@@ -796,6 +833,18 @@ impl Core {
 
     pub async fn all_mappings(&self) -> Result<Vec<Mapping>> {
         Ok(self.inner.db.all_mappings().await?)
+    }
+
+    /// The library title matched to an AniList entry, with the season if the entry belongs
+    /// to a single one. `None` when nothing in the library is matched to it.
+    pub async fn library_item_for(
+        &self,
+        media_id: i64,
+    ) -> Result<Option<(LibraryItem, Option<u32>)>> {
+        let Some((id, season)) = self.inner.db.jellyfin_for_media(media_id).await? else {
+            return Ok(None);
+        };
+        Ok(Some((self.library_item(&id).await?, season)))
     }
 
     pub async fn mappings_for(&self, jellyfin_id: &str) -> Result<Vec<Mapping>> {

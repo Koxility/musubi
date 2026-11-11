@@ -2,10 +2,13 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use iced::Task;
 use iced::widget::image::{self, Allocation, Handle};
 use musubi_core::Core;
+
+use crate::theme;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ImageKey {
@@ -14,10 +17,24 @@ pub enum ImageKey {
     Cover(String),
 }
 
-#[derive(Default)]
 pub struct ImageCache {
-    handles: HashMap<ImageKey, Handle>,
+    /// Each picture with the moment it arrived, from which it fades in.
+    handles: HashMap<ImageKey, (Handle, Instant)>,
     requested: HashSet<ImageKey>,
+    /// The app's frame clock; fades are read at this instant.
+    now: Instant,
+    newest: Option<Instant>,
+}
+
+impl Default for ImageCache {
+    fn default() -> Self {
+        Self {
+            handles: HashMap::new(),
+            requested: HashSet::new(),
+            now: Instant::now(),
+            newest: None,
+        }
+    }
 }
 
 /// Liest ein Bild aus dem Cache in den Speicher.
@@ -62,7 +79,25 @@ fn decoded(
 
 impl ImageCache {
     pub fn get(&self, key: &ImageKey) -> Option<&Handle> {
-        self.handles.get(key)
+        self.handles.get(key).map(|(handle, _)| handle)
+    }
+
+    /// How visible a picture is while it fades in after loading.
+    pub fn opacity(&self, key: &ImageKey) -> f32 {
+        self.handles.get(key).map_or(1.0, |(_, since)| {
+            theme::fade_in(self.now.saturating_duration_since(*since))
+        })
+    }
+
+    /// Moves the fades on to the frame at `at`.
+    pub fn tick(&mut self, at: Instant) {
+        self.now = at;
+    }
+
+    /// Whether a picture is still fading in.
+    pub fn fading(&self) -> bool {
+        self.newest
+            .is_some_and(|since| self.now.saturating_duration_since(since) < theme::FADE)
     }
 
     /// Fordert ein Bild einmalig an. Fehlgeschlagene Bilder bleiben Platzhalter.
@@ -90,7 +125,10 @@ impl ImageCache {
     pub fn loaded(&mut self, key: ImageKey, result: Result<Handle, String>) {
         match result {
             Ok(handle) => {
-                self.handles.insert(key, handle);
+                let now = Instant::now();
+                self.now = now;
+                self.newest = Some(now);
+                self.handles.insert(key, (handle, now));
             }
             Err(error) => tracing::warn!(%error, ?key, "image could not be loaded"),
         }

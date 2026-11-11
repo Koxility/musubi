@@ -1,4 +1,6 @@
-//! Benannte Werte für Farbe, Abstand, Radius und Schriftgröße.
+//! Named values for colour, spacing, radius, font size and motion.
+
+use std::time::Duration;
 
 use iced::{Color, Theme};
 use musubi_core::domain::ListStatus;
@@ -61,7 +63,20 @@ pub const T_PAGE: f32 = 28.0;
 /// Title on the Home hero.
 pub const T_HERO: f32 = 52.0;
 
-/// Dieselbe Farbe mit anderer Deckkraft.
+// Motion. Short and eased out: things settle, they do not bounce.
+/// Layout changes such as the sidebar sliding away.
+pub const MOTION: Duration = Duration::from_millis(220);
+
+/// Fades of pages and covers.
+pub const FADE: Duration = Duration::from_millis(180);
+
+/// How far a fade that started `elapsed` ago has come, from 0 to 1, eased out.
+pub fn fade_in(elapsed: Duration) -> f32 {
+    let t = (elapsed.as_secs_f32() / FADE.as_secs_f32()).min(1.0);
+    1.0 - (1.0 - t).powi(3)
+}
+
+/// The same colour with a different opacity.
 pub const fn alpha(color: Color, a: f32) -> Color {
     Color { a, ..color }
 }
