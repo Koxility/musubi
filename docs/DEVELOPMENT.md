@@ -70,13 +70,17 @@ cargo run -p musubi-core --example demo_backend -- --login
 
 The workspace is split into crates whose dependencies only point downwards. The GUI talks to the core and nothing else. See [ARCHITECTURE.md](ARCHITECTURE.md) for the crate diagram, the matching and sync rules, and known limitations.
 
-Code comments are written in German. The UI, docs and commit messages are in English.
+Everything is written in English: code comments, UI, docs and commit messages. Older code still has German comments; translate them when you change that code.
 
 ## Releasing
 
 1. Set the version in `Cargo.toml` (`[workspace.package]`) and run `cargo build` once, so `Cargo.lock` picks up the new version. The release workflow builds with `--locked` and fails otherwise.
 2. Add a `## [x.y.z] - YYYY-MM-DD` section to `CHANGELOG.md`.
-3. Merge to `master`, then tag and push:
+3. Merge to `master`, then fetch it, tag and push. Without the fetch, `origin/master` can be stale and the tag lands on an older commit; the release then fails because the version doesn't match.
+
+```bash
+git fetch origin master
+```
 
 ```bash
 git tag -a vx.y.z -m "Musubi x.y.z" origin/master
