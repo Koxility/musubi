@@ -1059,6 +1059,14 @@ async fn matches_show_english_titles_and_can_be_added_to_a_list() {
 
 /// Jellyfin with one series. Each season is `(number, episodes, AniList ID on the season)`.
 async fn mock_seasons(seasons: &[(u32, u32, Option<&str>)]) -> MockServer {
+    mock_seasons_without(seasons, &[]).await
+}
+
+/// Like [`mock_seasons`], but the `(season, episode)` pairs in `missing` are not in the library.
+async fn mock_seasons_without(
+    seasons: &[(u32, u32, Option<&str>)],
+    missing: &[(u32, u32)],
+) -> MockServer {
     let server = MockServer::start().await;
     let ok = |body: Value| ResponseTemplate::new(200).set_body_json(body);
     Mock::given(method("GET"))
@@ -1075,11 +1083,13 @@ async fn mock_seasons(seasons: &[(u32, u32, Option<&str>)]) -> MockServer {
         .await;
     let episodes: Vec<Value> = seasons
         .iter()
-        .flat_map(|&(season, count, _)| {
-            (1..=count).map(move |number| {
+        .flat_map(|&(season, count, _)| (1..=count).map(move |number| (season, number)))
+        .filter(|episode| !missing.contains(episode))
+        .map(|(season, number)| {
+            {
                 json!({"Id": format!("e{season}x{number}"), "Name": "Ep", "SeriesName": "Show",
                     "ParentIndexNumber": season, "IndexNumber": number})
-            })
+            }
         })
         .collect();
     Mock::given(method("GET"))
@@ -1183,8 +1193,14 @@ async fn one_long_entry_spans_many_seasons_despite_wrong_season_ids() {
 #[tokio::test]
 async fn a_two_part_season_skips_the_episode_zero_kept_in_specials() {
     let dir = tempfile::tempdir().unwrap();
-    let jellyfin = mock_seasons(&[(0, 1, None), (1, 24, None)]).await;
-    let anilist = mock_chain(&[(1, "Show", 13), (2, "Show Part 2", 12)]).await;
+    // A later season follows, so the two-part season is complete and not just short.
+    let jellyfin = mock_seasons(&[(0, 1, None), (1, 24, None), (2, 12, None)]).await;
+    let anilist = mock_chain(&[
+        (1, "Show", 13),
+        (2, "Show Part 2", 12),
+        (3, "Show Season 2", 12),
+    ])
+    .await;
     let core = chain_core(dir.path(), &jellyfin, &anilist).await;
 
     let outcome = core.auto_match(&series()).await.unwrap();
@@ -1195,4 +1211,86 @@ async fn a_two_part_season_skips_the_episode_zero_kept_in_specials() {
     assert_eq!(resolve_episode(&mappings, 1, 12), Some((1, 13)));
     assert_eq!(resolve_episode(&mappings, 1, 13), Some((2, 1)));
     assert_eq!(resolve_episode(&mappings, 1, 24), Some((2, 12)));
+    assert_eq!(resolve_episode(&mappings, 2, 1), Some((3, 1)));
+}
+
+/// The layout of a real library: a classic run split into sixteen seasons that AniList keeps
+/// as one entry, then one season holding four sequel entries, its last two episodes not in
+/// the library yet. The metadata plugin wrote sequel IDs on the classic seasons.
+#[tokio::test]
+async fn many_seasons_share_one_entry_and_one_season_splits_over_four() {
+    let dir = tempfile::tempdir().unwrap();
+    const CLASSIC: [u32; 16] = [
+        20, 21, 22, 28, 18, 22, 20, 16, 22, 16, 7, 17, 36, 51, 26, 24,
+    ];
+    let wrong = ["269", "116674", "159322", "169755", "185874"];
+    let mut seasons = vec![(0, 4, Some("834"))];
+    for (index, count) in CLASSIC.into_iter().enumerate() {
+        let id = match index {
+            0..5 => wrong[index],
+            _ if index % 2 == 1 => "169755",
+            _ => "185874",
+        };
+        seasons.push((index as u32 + 1, count, Some(id)));
+    }
+    seasons.push((17, 48, Some("185874")));
+    let jellyfin = mock_seasons(&seasons).await;
+    let anilist = mock_chain(&[
+        (269, "Show", 366),
+        (116674, "Show: War", 13),
+        (159322, "Show: War 2", 13),
+        (169755, "Show: War 3", 14),
+        (185874, "Show: War 4", 10),
+    ])
+    .await;
+    let core = chain_core(dir.path(), &jellyfin, &anilist).await;
+
+    let outcome = core.auto_match(&series()).await.unwrap();
+
+    assert_eq!(outcome, MatchOutcome::Mapped);
+    let mappings = core.mappings_for("s1").await.unwrap();
+    assert!(mappings.iter().all(|m| m.source != MappingSource::Manual));
+    // Many seasons, one entry: the earlier seasons add up.
+    assert_eq!(resolve_episode(&mappings, 1, 1), Some((269, 1)));
+    assert_eq!(resolve_episode(&mappings, 2, 1), Some((269, 21)));
+    assert_eq!(resolve_episode(&mappings, 14, 1), Some((269, 266)));
+    assert_eq!(resolve_episode(&mappings, 16, 24), Some((269, 366)));
+    // One season, four entries, counted from the first episode of the first.
+    assert_eq!(resolve_episode(&mappings, 17, 1), Some((116674, 1)));
+    assert_eq!(resolve_episode(&mappings, 17, 13), Some((116674, 13)));
+    assert_eq!(resolve_episode(&mappings, 17, 14), Some((159322, 1)));
+    assert_eq!(resolve_episode(&mappings, 17, 27), Some((169755, 1)));
+    assert_eq!(resolve_episode(&mappings, 17, 41), Some((185874, 1)));
+    assert_eq!(resolve_episode(&mappings, 17, 48), Some((185874, 8)));
+}
+
+#[tokio::test]
+async fn an_episode_missing_inside_a_season_does_not_shift_the_next_season() {
+    let dir = tempfile::tempdir().unwrap();
+    let jellyfin = mock_seasons_without(&[(1, 10, None), (2, 10, None)], &[(1, 4)]).await;
+    let anilist = mock_chain(&[(100, "Show", 20)]).await;
+    let core = chain_core(dir.path(), &jellyfin, &anilist).await;
+
+    core.auto_match(&series()).await.unwrap();
+
+    let mappings = core.mappings_for("s1").await.unwrap();
+    assert_eq!(resolve_episode(&mappings, 1, 10), Some((100, 10)));
+    assert_eq!(resolve_episode(&mappings, 2, 1), Some((100, 11)));
+}
+
+#[tokio::test]
+async fn new_matching_rules_get_one_go_at_titles_left_without_a_match() {
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _jellyfin, _anilist) = franchise_core(dir.path()).await;
+    // Marked as tried by an earlier version, which found nothing.
+    core.unmap("s1").await.unwrap();
+
+    core.match_all(false).await.unwrap();
+
+    assert!(!core.mappings_for("s1").await.unwrap().is_empty());
+
+    // With the rules unchanged, a removed match stays removed.
+    core.unmap("s1").await.unwrap();
+    core.match_all(false).await.unwrap();
+    assert!(core.mappings_for("s1").await.unwrap().is_empty());
 }

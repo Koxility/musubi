@@ -4,6 +4,12 @@ All notable changes to Musubi are documented here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Fixed
+
+- **The newest season no longer starts a few episodes late.** A season split over several AniList entries that is still missing its latest episodes was mistaken for one whose episode 0 lives under Specials, and its first episodes were skipped. That rule now only applies to a season that has a later season after it.
+- **A missing episode no longer shifts later seasons.** When one AniList entry spans several Jellyfin seasons, each season is counted by its episode numbers instead of by the files present.
+- **Titles without a match get another try after an update.** A title that an older version could not match stayed unmatched for good. Whenever the matching rules change, such titles are searched again once.
+
 ## [0.4.0] - 2026-11-11
 
 ### Added
