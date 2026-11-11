@@ -3107,7 +3107,7 @@ dependencies = [
 
 [[package]]
 name = "musubi"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -3123,7 +3123,7 @@ dependencies = [
 
 [[package]]
 name = "musubi-anilist"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -3142,7 +3142,7 @@ dependencies = [
 
 [[package]]
 name = "musubi-core"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -3167,7 +3167,7 @@ dependencies = [
 
 [[package]]
 name = "musubi-domain"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "serde",
@@ -3177,7 +3177,7 @@ dependencies = [
 
 [[package]]
 name = "musubi-gui"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3200,7 +3200,7 @@ dependencies = [
 
 [[package]]
 name = "musubi-jellyfin"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "musubi-domain",
  "reqwest",
@@ -3216,7 +3216,7 @@ dependencies = [
 
 [[package]]
 name = "musubi-player"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "secrecy",
@@ -3226,7 +3226,7 @@ dependencies = [
 
 [[package]]
 name = "musubi-store"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "directories",
  "keyring-core",
