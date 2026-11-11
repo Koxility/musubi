@@ -1,24 +1,42 @@
-//! AniList-Seite: Übersicht mit Airing und Anime in Progress, Listen und Bearbeitung.
+//! AniList page: overview with airing titles and titles in progress, lists and editing.
 
 use std::fmt;
 
 use iced::widget::{
-    button, center, column, container, hover, pick_list, responsive, row, text, text_input,
+    Space, button, center, column, container, pick_list, row, stack, text, text_input,
 };
-use iced::{Center, Element, Fill, Task};
+use iced::{Bottom, Center, Element, Fill, Task};
 use musubi_core::domain::{
     EntryPatch, FuzzyDate, LibraryItem, ListEntry, ListStatus, Media, MediaKind, ScoreFormat,
     Viewer, airing_entries, in_progress_entries,
 };
+use musubi_core::{ViewConfig, ViewMode, ViewSize};
 
 use crate::app::{App, Message};
 use crate::icons::Icon;
 use crate::images::ImageKey;
 use crate::{theme, ui};
 
-const COVER: (f32, f32) = (124.0, 176.0);
-/// Rand der Karten, damit die Fläche beim Überfahren um das Cover herum sichtbar wird.
+/// Inset of the cards, so the hover surface shows around the cover.
 const CARD_PADDING: f32 = 6.0;
+
+/// Cover of a card for each size preset.
+fn cover_size(size: ViewSize) -> (f32, f32) {
+    match size {
+        ViewSize::Small => (118.0, 168.0),
+        ViewSize::Medium => (154.0, 218.0),
+        ViewSize::Large => (196.0, 278.0),
+    }
+}
+
+/// Cover at the start of a list row for each size preset.
+fn thumb_size(size: ViewSize) -> (f32, f32) {
+    match size {
+        ViewSize::Small => (34.0, 48.0),
+        ViewSize::Medium => (46.0, 65.0),
+        ViewSize::Large => (64.0, 90.0),
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Tab {
@@ -223,6 +241,8 @@ pub struct State {
     status: Option<ListStatus>,
     loading: bool,
     modal: Option<Modal>,
+    /// Layout and size of the lists, remembered in the config.
+    pub view: ViewConfig,
 }
 
 impl State {
@@ -270,6 +290,7 @@ pub enum Msg {
     Tab(Tab),
     Search(String),
     StatusFilter(Option<ListStatus>),
+    View(ViewConfig),
     Increment(ListEntry),
     OpenEditor(ListEntry),
     Edit(EditorEdit),
@@ -390,6 +411,10 @@ pub fn update(app: &mut App, msg: Msg) -> Task<Message> {
         Msg::Tab(tab) => app.anilist.tab = tab,
         Msg::Search(value) => app.anilist.search = value,
         Msg::StatusFilter(status) => app.anilist.status = status,
+        Msg::View(view) => {
+            app.anilist.view = view;
+            app.remember(|config| config.ui.anilist = view);
+        }
         Msg::Increment(entry) => {
             let progress = entry.progress + 1;
             if entry.media.total_units().is_some_and(|t| progress > t) {
@@ -596,60 +621,107 @@ fn can_increment(entry: &ListEntry) -> bool {
     entry.media.total_units().is_none_or(|t| entry.progress < t)
 }
 
-/// Runder Knopf, der den Fortschritt um eins erhöht.
-fn plus_one<'a>(entry: &ListEntry, size: f32) -> Element<'a, Msg> {
-    let label = if entry.media.kind == MediaKind::Anime {
+/// The "+1" action of an entry, disabled once the progress has reached the total.
+fn plus_one<'a>(entry: &ListEntry) -> Element<'a, Msg> {
+    let tip = if entry.media.kind == MediaKind::Anime {
         "Watched one more episode"
     } else {
         "Read one more chapter"
     };
-    ui::icon_button(
-        Icon::Plus,
-        size,
-        theme::TRACK,
+    ui::plus_one(
         can_increment(entry).then(|| Msg::Increment(entry.clone())),
-        label,
-        theme::ghost_button,
+        tip,
     )
 }
 
-/// Karte im Stil der AniList-Startseite, mit `+1` beim Überfahren.
-fn progress_card<'a>(app: &'a App, entry: &ListEntry) -> Element<'a, Msg> {
+/// Card in the style of the AniList home page. The "+1" sits in the top-right corner of
+/// the cover; an airing title shows the countdown right of its episode count.
+fn entry_card<'a>(app: &'a App, entry: &ListEntry, size: ViewSize) -> Element<'a, Msg> {
+    let cover_size = cover_size(size);
     let image = ui::with_progress(
-        cover(app, &entry.media, COVER.0, COVER.1),
+        cover(app, &entry.media, cover_size.0, cover_size.1),
         fraction(entry),
-        COVER,
+        cover_size,
         theme::TRACK,
     );
-    let behind = entry.episodes_behind();
-    let mut info = row![ui::muted(format!("{} / {}", entry.progress, total(entry)))]
-        .spacing(6)
-        .align_y(Center);
-    if behind > 0 {
-        info = info.push(ui::tag(format!("{behind} behind"), theme::WARN));
+    let (title_size, detail_size) = match size {
+        ViewSize::Small => (theme::T_SMALL, theme::T_LABEL),
+        ViewSize::Medium => (theme::T_BODY, theme::T_SMALL),
+        ViewSize::Large => (theme::T_CARD, theme::T_SMALL),
+    };
+    let mut info = row![
+        text(format!("{} / {}", entry.progress, total(entry)))
+            .size(detail_size)
+            .color(theme::MUTED)
+    ]
+    .align_y(Center);
+    if let Some(next) = entry.media.next_airing {
+        let left = ui::countdown(next.airing_at - app.now);
+        // The small card only has room for the time itself.
+        let label = if size == ViewSize::Small {
+            left
+        } else {
+            format!("Ep {} · {left}", next.episode)
+        };
+        info = info.push(ui::spacer()).push(
+            row![
+                ui::icon(Icon::Clock, detail_size, theme::TRACK),
+                text(label)
+                    .size(detail_size)
+                    .font(theme::SEMIBOLD)
+                    .color(theme::TRACK),
+            ]
+            .spacing(4)
+            .align_y(Center),
+        );
     }
+    // Roughly what fits on one line of the card at this font size.
+    let fits = (cover_size.0 / (title_size * 0.5)) as usize;
     let base = button(
         column![
             image,
             column![
-                text(ui::ellipsize(entry.media.title.preferred(), 17))
-                    .size(theme::T_SMALL)
+                text(ui::ellipsize(entry.media.title.preferred(), fits))
+                    .size(title_size)
                     .font(theme::MEDIUM),
                 info,
             ]
-            .spacing(2),
+            .spacing(3),
         ]
+        .width(cover_size.0)
         .spacing(theme::S2),
     )
     .padding(CARD_PADDING)
     .style(theme::card_button)
     .on_press(Msg::OpenEditor(entry.clone()));
-    let side = COVER.0 + 2.0 * CARD_PADDING;
-    let plus = container(plus_one(entry, 15.0))
-        .padding(CARD_PADDING + 6.0)
-        .width(side)
-        .align_right(side);
-    hover(base, plus)
+    let behind = entry.episodes_behind();
+    let mut marks = row![].align_y(iced::Top);
+    if behind > 0 {
+        marks = marks.push(ui::badge_row(format!("{behind} behind"), theme::WARN));
+    }
+    marks = marks.push(ui::spacer());
+    if entry.is_watching() {
+        marks = marks.push(plus_one(entry));
+    }
+    let side = cover_size.0 + 2.0 * CARD_PADDING;
+    stack![
+        base,
+        container(marks).padding(CARD_PADDING + 6.0).width(side)
+    ]
+    .into()
+}
+
+/// Wrapping grid of cards. They have their own inset, so the grid moves left by it to line
+/// the covers up with the heading.
+fn card_grid<'a>(app: &'a App, entries: &[&'a ListEntry], size: ViewSize) -> Element<'a, Msg> {
+    container(
+        row(entries.iter().map(|e| entry_card(app, e, size)))
+            .spacing(theme::S2)
+            .wrap()
+            .vertical_spacing(theme::S3),
+    )
+    .padding(iced::padding::left(-CARD_PADDING))
+    .into()
 }
 
 fn card_section<'a>(
@@ -660,90 +732,13 @@ fn card_section<'a>(
     if entries.is_empty() {
         return None;
     }
-    let count = entries.len();
-    let cards = entries.iter().map(|e| progress_card(app, e));
     Some(ui::section(
-        ui::heading_count(title, count),
-        // Die Karten haben einen eigenen Rand und rücken deshalb unter die Überschrift ein.
-        container(
-            row(cards)
-                .spacing(theme::S1)
-                .wrap()
-                .vertical_spacing(theme::S2),
-        )
-        .padding(iced::padding::left(-CARD_PADDING)),
+        ui::heading_count(title, entries.len()),
+        card_grid(app, &entries, app.anilist.view.size),
     ))
 }
 
-/// Zeile des Sendeplans: nächste Folge, Countdown und eigener Stand.
-fn airing_row<'a>(app: &'a App, entry: &'a ListEntry) -> Element<'a, Msg> {
-    let next = entry.media.next_airing;
-    let when = next.map_or(String::new(), |n| ui::countdown(n.airing_at - app.now));
-    let episode = next.map_or(String::new(), |n| format!("Episode {}", n.episode));
-    let behind = entry.episodes_behind();
-    let mut state = row![ui::muted(format!("{} / {}", entry.progress, total(entry)))]
-        .spacing(6)
-        .align_y(Center);
-    if behind > 0 {
-        state = state.push(ui::tag(format!("{behind} behind"), theme::WARN));
-    }
-    let info = button(
-        row![
-            cover(app, &entry.media, 40.0, 56.0),
-            column![
-                text(ui::ellipsize(entry.media.title.preferred(), 30))
-                    .size(theme::T_SMALL)
-                    .font(theme::MEDIUM),
-                state,
-            ]
-            .spacing(3)
-            .width(Fill),
-            column![
-                text(when)
-                    .size(theme::T_SMALL)
-                    .font(theme::SEMIBOLD)
-                    .color(theme::TRACK),
-                ui::muted(episode),
-            ]
-            .spacing(3)
-            .align_x(iced::Alignment::End),
-        ]
-        .spacing(theme::S3)
-        .align_y(Center),
-    )
-    .width(Fill)
-    .padding([6.0, theme::S2])
-    .style(theme::row_button)
-    .on_press(Msg::OpenEditor(entry.clone()));
-    row![info, plus_one(entry, 14.0)]
-        .spacing(theme::S2)
-        .align_y(Center)
-        .into()
-}
-
-/// Sendeplan der laufenden Titel, die nächste Folge zuerst.
-fn schedule<'a>(app: &'a App, entries: Vec<&'a ListEntry>) -> Element<'a, Msg> {
-    let count = entries.len();
-    let rows: Vec<Element<'a, Msg>> = entries.into_iter().map(|e| airing_row(app, e)).collect();
-    let body: Element<'a, Msg> = if rows.is_empty() {
-        container(ui::muted(
-            "Nothing you watch is airing right now. Titles appear here once a next episode is scheduled.",
-        ))
-        .padding(theme::S2)
-        .into()
-    } else {
-        ui::divided(rows).into()
-    };
-    ui::section(
-        ui::heading_count("Airing", count),
-        container(body)
-            .padding(theme::S2)
-            .width(Fill)
-            .style(theme::surface),
-    )
-}
-
-/// Kennzahlen über der Übersicht.
+/// Key figures above the overview.
 fn overview_numbers(app: &App) -> Element<'_, Msg> {
     let state = &app.anilist;
     let watching = state
@@ -776,13 +771,23 @@ fn overview_numbers(app: &App) -> Element<'_, Msg> {
     .into()
 }
 
-fn progress_sections(app: &App) -> Element<'_, Msg> {
+/// Airing titles first, the next episode leading, then everything else in progress. All
+/// three sections share one card layout.
+fn overview_sections(app: &App) -> Element<'_, Msg> {
     let state = &app.anilist;
+    let airing = card_section(app, "Airing", airing_entries(&state.anime)).unwrap_or_else(|| {
+        ui::section(
+            ui::heading_count("Airing", 0),
+            ui::muted(
+                "Nothing you watch is airing right now. Titles appear here once a next episode is scheduled.",
+            ),
+        )
+    });
     let sections = [
         card_section(app, "Anime in progress", in_progress_entries(&state.anime)),
         card_section(app, "Manga in progress", in_progress_entries(&state.manga)),
     ];
-    let mut content = column![].spacing(theme::S5);
+    let mut content = column![airing].spacing(theme::S6);
     let mut any = false;
     for section in sections.into_iter().flatten() {
         any = true;
@@ -809,41 +814,20 @@ fn overview(app: &App) -> Element<'_, Msg> {
             )
         };
     }
-    responsive(move |size| {
-        let airing = schedule(app, airing_entries(&app.anilist.anime));
-        // Breit stehen Sendeplan und Karten nebeneinander, schmal untereinander.
-        let body: Element<'_, Msg> = if size.width >= 900.0 {
-            row![
-                container(airing).width(400),
-                container(progress_sections(app)).width(Fill),
-            ]
-            .spacing(theme::S6)
-            .into()
-        } else {
-            column![airing, progress_sections(app)]
-                .spacing(theme::S5)
-                .into()
-        };
-        ui::scroll(
-            column![overview_numbers(app), body]
-                .spacing(theme::S5)
-                .padding(iced::Padding {
-                    top: 0.0,
-                    right: 0.0,
-                    bottom: theme::S6,
-                    left: 0.0,
-                }),
-        )
-    })
-    .into()
+    ui::scroll(
+        column![overview_numbers(app), overview_sections(app)]
+            .spacing(theme::S5)
+            .padding(iced::padding::bottom(theme::S6)),
+    )
 }
 
-/// Spaltenbreiten der Listen, für Kopf und Zeilen gleich.
+/// Column widths of the lists, shared by head and rows.
 const SCORE_WIDTH: f32 = 64.0;
-const PROGRESS_WIDTH: f32 = 150.0;
+const PROGRESS_WIDTH: f32 = 110.0;
+const PLUS_WIDTH: f32 = 56.0;
 const FORMAT_WIDTH: f32 = 72.0;
 
-fn list_head<'a>(kind: MediaKind) -> Element<'a, Msg> {
+fn list_head<'a>(kind: MediaKind, size: ViewSize) -> Element<'a, Msg> {
     let cell = |label: &'a str| text(label).size(theme::T_CAPTION).color(theme::FAINT);
     row![
         cell("Title").width(Fill),
@@ -853,7 +837,7 @@ fn list_head<'a>(kind: MediaKind) -> Element<'a, Msg> {
         } else {
             "Chapters"
         })
-        .width(PROGRESS_WIDTH),
+        .width(PROGRESS_WIDTH + theme::S3 + PLUS_WIDTH),
         cell("Format").width(FORMAT_WIDTH),
     ]
     .spacing(theme::S3)
@@ -861,12 +845,23 @@ fn list_head<'a>(kind: MediaKind) -> Element<'a, Msg> {
         top: 0.0,
         right: theme::S2,
         bottom: 6.0,
-        left: theme::S2 + 40.0 + theme::S3,
+        left: theme::S2 + thumb_size(size).0 + theme::S3,
     })
     .into()
 }
 
-fn list_row<'a>(app: &'a App, entry: &ListEntry, format: ScoreFormat) -> Element<'a, Msg> {
+fn list_row<'a>(
+    app: &'a App,
+    entry: &ListEntry,
+    format: ScoreFormat,
+    size: ViewSize,
+) -> Element<'a, Msg> {
+    let thumb = thumb_size(size);
+    let (title_size, detail_size) = match size {
+        ViewSize::Small => (theme::T_SMALL, theme::T_LABEL),
+        ViewSize::Medium => (theme::T_BODY, theme::T_SMALL),
+        ViewSize::Large => (theme::T_TITLE, theme::T_BODY),
+    };
     let score = if entry.score_raw == 0 {
         "–".to_owned()
     } else {
@@ -874,7 +869,7 @@ fn list_row<'a>(app: &'a App, entry: &ListEntry, format: ScoreFormat) -> Element
     };
     let mut title = row![
         text(ui::ellipsize(entry.media.title.preferred(), 64))
-            .size(theme::T_BODY)
+            .size(title_size)
             .font(theme::MEDIUM)
     ]
     .spacing(theme::S2)
@@ -888,11 +883,33 @@ fn list_row<'a>(app: &'a App, entry: &ListEntry, format: ScoreFormat) -> Element
     if entry.private {
         title = title.push(ui::tag("Private", theme::MUTED));
     }
+    let mut heading = column![title].spacing(3);
+    // The large row has room for the countdown and the notes on a second line.
+    let next = entry.media.next_airing.filter(|_| entry.is_watching());
+    let mut detail = row![].spacing(theme::S2).align_y(Center);
+    let mut has_detail = false;
+    if let Some(next) = next {
+        has_detail = true;
+        detail = detail.push(
+            text(format!(
+                "Ep {} in {}",
+                next.episode,
+                ui::countdown(next.airing_at - app.now)
+            ))
+            .size(theme::T_SMALL)
+            .font(theme::SEMIBOLD)
+            .color(theme::TRACK),
+        );
+    }
     if !entry.notes.is_empty() {
-        title = title.push(ui::muted(ui::ellipsize(&entry.notes, 40)));
+        has_detail = true;
+        detail = detail.push(ui::muted(ui::ellipsize(&entry.notes, 60)));
+    }
+    if has_detail && size != ViewSize::Small {
+        heading = heading.push(detail);
     }
     let amount = column![
-        text(format!("{} / {}", entry.progress, total(entry))).size(theme::T_SMALL),
+        text(format!("{} / {}", entry.progress, total(entry))).size(detail_size),
         ui::bar(
             fraction(entry).unwrap_or(0.0),
             theme::status_color(entry.status),
@@ -901,13 +918,12 @@ fn list_row<'a>(app: &'a App, entry: &ListEntry, format: ScoreFormat) -> Element
     ]
     .spacing(5)
     .width(Fill);
-    let active = matches!(entry.status, ListStatus::Current | ListStatus::Repeating);
     let info = button(
         row![
-            cover(app, &entry.media, 40.0, 56.0),
-            container(title).width(Fill),
-            text(score).size(theme::T_SMALL).width(SCORE_WIDTH),
-            container(amount).width(PROGRESS_WIDTH - 44.0),
+            cover(app, &entry.media, thumb.0, thumb.1),
+            container(heading).width(Fill),
+            text(score).size(detail_size).width(SCORE_WIDTH),
+            container(amount).width(PROGRESS_WIDTH),
         ]
         .spacing(theme::S3)
         .align_y(Center),
@@ -916,14 +932,14 @@ fn list_row<'a>(app: &'a App, entry: &ListEntry, format: ScoreFormat) -> Element
     .padding([6.0, theme::S2])
     .style(theme::row_button)
     .on_press(Msg::OpenEditor(entry.clone()));
-    let plus: Element<'a, Msg> = if active {
-        plus_one(entry, 13.0)
+    let plus: Element<'a, Msg> = if entry.is_watching() {
+        plus_one(entry)
     } else {
-        iced::widget::Space::new().width(23.4).into()
+        Space::new().into()
     };
     row![
         info,
-        container(plus).width(32),
+        container(plus).width(PLUS_WIDTH),
         text(entry.media.format.clone().unwrap_or_default())
             .size(theme::T_LABEL)
             .color(theme::MUTED)
@@ -943,7 +959,7 @@ fn status_filter<'a>(state: &'a State, kind: MediaKind) -> Element<'a, Msg> {
         let dot = value.map_or(theme::FAINT, theme::status_color);
         button(
             row![
-                container(iced::widget::Space::new())
+                container(Space::new())
                     .width(8)
                     .height(8)
                     .style(theme::solid(dot, 4.0)),
@@ -988,6 +1004,7 @@ fn status_filter<'a>(state: &'a State, kind: MediaKind) -> Element<'a, Msg> {
 
 fn list_view(app: &App) -> Element<'_, Msg> {
     let state = &app.anilist;
+    let view = state.view;
     let kind = state.kind();
     let format = app
         .core
@@ -1023,10 +1040,8 @@ fn list_view(app: &App) -> Element<'_, Msg> {
         }
         any = true;
         let count = entries.len();
-        let rows: Vec<Element<'_, Msg>> =
-            entries.iter().map(|e| list_row(app, e, format)).collect();
         let heading = row![
-            container(iced::widget::Space::new())
+            container(Space::new())
                 .width(4)
                 .height(18)
                 .style(theme::solid(theme::status_color(status), 2.0)),
@@ -1034,18 +1049,26 @@ fn list_view(app: &App) -> Element<'_, Msg> {
         ]
         .spacing(theme::S2)
         .align_y(Center);
-        body = body.push(ui::section(
-            heading.into(),
-            container(column![list_head(kind), ui::divided(rows)])
-                .padding(iced::Padding {
-                    top: theme::S3,
-                    right: theme::S1,
-                    bottom: theme::S1,
-                    left: theme::S1,
-                })
-                .width(Fill)
-                .style(theme::surface),
-        ));
+        let content: Element<'_, Msg> = match view.mode {
+            ViewMode::Grid => card_grid(app, &entries, view.size),
+            ViewMode::List => {
+                let rows: Vec<Element<'_, Msg>> = entries
+                    .iter()
+                    .map(|e| list_row(app, e, format, view.size))
+                    .collect();
+                container(column![list_head(kind, view.size), ui::divided(rows)])
+                    .padding(iced::Padding {
+                        top: theme::S3,
+                        right: theme::S1,
+                        bottom: theme::S1,
+                        left: theme::S1,
+                    })
+                    .width(Fill)
+                    .style(theme::surface)
+                    .into()
+            }
+        };
+        body = body.push(ui::section(heading.into(), content));
     }
     let list: Element<'_, Msg> = if any {
         ui::scroll(body)
@@ -1091,14 +1114,25 @@ fn header(state: &State) -> Element<'_, Msg> {
         .spacing(theme::S2)
         .align_y(Center),
         column![
-            ui::tabs(
-                [
-                    tab("Overview", Tab::Overview),
-                    tab("Anime list", Tab::Anime),
-                    tab("Manga list", Tab::Manga),
-                ],
-                theme::TRACK,
-            ),
+            row![
+                ui::tabs(
+                    [
+                        tab("Overview", Tab::Overview),
+                        tab("Anime list", Tab::Anime),
+                        tab("Manga list", Tab::Manga),
+                    ],
+                    theme::TRACK,
+                ),
+                ui::spacer(),
+                // The overview is always cards, so it only offers the sizes.
+                container(ui::view_controls(
+                    state.view,
+                    state.tab != Tab::Overview,
+                    Msg::View
+                ))
+                .padding(iced::padding::bottom(6)),
+            ]
+            .align_y(Bottom),
             ui::divider()
         ],
     ]

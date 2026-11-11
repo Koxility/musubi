@@ -43,9 +43,10 @@ pub enum Icon {
     External,
     Trash,
     Question,
+    Grid,
 }
 
-const ALL: [Icon; 37] = [
+const ALL: [Icon; 38] = [
     Icon::Play,
     Icon::Pause,
     Icon::SkipPrevious,
@@ -83,6 +84,7 @@ const ALL: [Icon; 37] = [
     Icon::External,
     Icon::Trash,
     Icon::Question,
+    Icon::Grid,
 ];
 
 /// Gefüllte Formen.
@@ -205,6 +207,12 @@ impl Icon {
             Self::ChevronLeft => stroke("M14.5 5.5L8 12l6.5 6.5"),
             Self::ChevronRight => stroke("M9.5 5.5L16 12l-6.5 6.5"),
             Self::Close => stroke("M6 6l12 12M18 6L6 18"),
+            Self::Grid => [(4.5, 4.5), (13.5, 4.5), (4.5, 13.5), (13.5, 13.5)]
+                .iter()
+                .map(|(x, y)| {
+                    format!(r#"<rect {STROKE} x="{x}" y="{y}" width="6" height="6" rx="1.4"/>"#)
+                })
+                .collect(),
             Self::External => stroke(
                 "M13.5 4.5h6v6M19.5 4.5L11 13M17.5 14v4a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 18V8A1.5 1.5 0 0 1 6 6.5h4",
             ),

@@ -35,16 +35,17 @@ impl Core {
         Ok(path)
     }
 
-    /// Pfad zum breiten Hintergrundbild eines Jellyfin-Items.
+    /// Path to the wide backdrop of a Jellyfin item, large enough for the Home hero.
     pub async fn backdrop(&self, item_id: &str) -> Result<PathBuf> {
+        // The width is part of the name, so smaller copies from older versions are not reused.
         let path = self
             .inner
             .paths
             .images_dir()
-            .join(cache_name("jf-backdrop", item_id));
+            .join(cache_name("jf-backdrop-1920", item_id));
         if !path.exists() {
             let session = self.require_jellyfin()?;
-            let bytes = session.client.backdrop(item_id, 1280).await?;
+            let bytes = session.client.backdrop(item_id, 1920).await?;
             self.store_image(&path, &bytes).await?;
         }
         Ok(path)

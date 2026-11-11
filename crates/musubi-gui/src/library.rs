@@ -1,4 +1,4 @@
-//! Bibliotheksraster und Detailseite einer Serie.
+//! Library as a grid or a list, and the detail page of a title.
 
 use iced::widget::{
     Space, button, center, column, container, responsive, row, stack, text, text_input,
@@ -9,17 +9,33 @@ use musubi_core::domain::{
     ItemKind, Library, LibraryFilters, LibraryItem, LibraryQuery, LibrarySort, Mapping,
     MappingSource, is_unsure, season_mappings,
 };
-use musubi_core::{EpisodeRow, LibraryRow};
+use musubi_core::{EpisodeRow, LibraryRow, ViewConfig, ViewMode, ViewSize};
 
 use crate::app::{App, Message, Page};
 use crate::icons::Icon;
 use crate::images::ImageKey;
 use crate::{anilist, mapping, theme, ui};
 
-const CARD_WIDTH: f32 = 168.0;
-const CARD_HEIGHT: f32 = 252.0;
-/// Rand der Karten, damit die Fläche beim Überfahren um das Poster herum sichtbar wird.
+/// Inset of the cards, so the hover surface shows around the poster.
 const CARD_PADDING: f32 = 6.0;
+
+/// Poster of a grid card for each size preset.
+fn card_size(size: ViewSize) -> (f32, f32) {
+    match size {
+        ViewSize::Small => (132.0, 198.0),
+        ViewSize::Medium => (172.0, 258.0),
+        ViewSize::Large => (224.0, 336.0),
+    }
+}
+
+/// Poster at the start of a list row for each size preset.
+fn thumb_size(size: ViewSize) -> (f32, f32) {
+    match size {
+        ViewSize::Small => (40.0, 60.0),
+        ViewSize::Medium => (60.0, 90.0),
+        ViewSize::Large => (92.0, 138.0),
+    }
+}
 const GAP: f32 = theme::S2;
 const BACKDROP_HEIGHT: f32 = 500.0;
 const THUMB: (f32, f32) = (208.0, 117.0);
@@ -59,6 +75,8 @@ pub struct State {
     generation: u64,
     applied: u64,
     pub detail: Option<Detail>,
+    /// Grid or list and the size preset, remembered in the config.
+    pub view: ViewConfig,
 }
 
 impl Default for State {
@@ -78,6 +96,7 @@ impl Default for State {
             generation: 0,
             applied: 0,
             detail: None,
+            view: ViewConfig::default(),
         }
     }
 }
@@ -101,6 +120,7 @@ pub enum Msg {
     SearchChanged(String),
     Search,
     Filter(Filter),
+    View(ViewConfig),
     Open(LibraryItem),
     CloseDetail,
     Episodes(String, Result<Vec<EpisodeRow>, String>),
@@ -243,6 +263,10 @@ pub fn update(app: &mut App, msg: Msg) -> Task<Message> {
             }
             return load(app);
         }
+        Msg::View(view) => {
+            app.library.view = view;
+            app.remember(|config| config.ui.library = view);
+        }
         Msg::Open(item) => return open_detail(app, item),
         Msg::CloseDetail => app.close_detail(),
         Msg::Episodes(id, result) => match (&mut app.library.detail, result) {
@@ -361,7 +385,7 @@ fn fixed(values: &[&str]) -> Vec<String> {
     values.iter().map(|v| (*v).to_owned()).collect()
 }
 
-/// Kopf der Bibliothek: Titel, Suche, Bibliotheken als Reiter und Filter.
+/// Head of the library: title, search, libraries as tabs, filters and the view switch.
 fn toolbar(state: &State, shown: usize) -> Element<'_, Msg> {
     let libraries = with_all(
         ALL_LIBRARIES,
@@ -388,7 +412,7 @@ fn toolbar(state: &State, shown: usize) -> Element<'_, Msg> {
     ]
     .spacing(theme::S3)
     .align_y(Bottom);
-    // Wenige Bibliotheken stehen als Reiter da, viele passen nur in eine Auswahlliste.
+    // A few libraries show as tabs, many only fit a pick list.
     let library: Element<'_, Msg> = if libraries.len() <= 6 {
         ui::tabs(
             libraries.into_iter().map(|name| {
@@ -421,6 +445,7 @@ fn toolbar(state: &State, shown: usize) -> Element<'_, Msg> {
         row![
             ui::muted("Sort by"),
             choice(fixed(&SORTS), &state.sort, Filter::Sort),
+            ui::view_controls(state.view, true, Msg::View),
         ]
         .spacing(theme::S2)
         .align_y(Center),
@@ -432,14 +457,14 @@ fn toolbar(state: &State, shown: usize) -> Element<'_, Msg> {
         .into()
 }
 
-/// Rundes Zeichen auf einem Poster.
+/// Round mark on a poster.
 fn poster_mark<'a>(glyph: Icon, color: Color, background: Color) -> Element<'a, Msg> {
     container(center(ui::icon(glyph, 12.0, color)).width(22).height(22))
         .style(theme::solid(background, theme::PILL))
         .into()
 }
 
-/// Kurzform des AniList-Eintrags, z. B. `Watching 2/28`.
+/// Short form of the AniList entry, e.g. `Watching 2/28`.
 fn entry_summary(entry: &ListEntry) -> String {
     format!(
         "{} {}/{}",
@@ -452,60 +477,83 @@ fn entry_summary(entry: &ListEntry) -> String {
     )
 }
 
-fn poster_card<'a>(app: &'a App, row_data: &'a LibraryRow) -> Element<'a, Msg> {
-    let item = &row_data.item;
-    let key = item.has_poster.then(|| ImageKey::Poster(item.id.clone()));
-    let image = ui::picture(&app.images, key, CARD_WIDTH, CARD_HEIGHT, want);
-    let progress = item
-        .runtime_secs
-        .filter(|r| *r > 0 && item.position_secs > 0)
-        .map(|r| item.position_secs as f32 / r as f32);
-    let image = ui::with_progress(image, progress, (CARD_WIDTH, CARD_HEIGHT), theme::WATCH);
-    // Oben rechts der Stand in Jellyfin, unten links die Verbindung zu AniList.
-    let watch: Element<'a, Msg> = match item.unplayed_count.filter(|c| *c > 0) {
+/// What Jellyfin knows about watching a title: episodes left, or a check once it is done.
+fn watch_mark<'a>(item: &LibraryItem) -> Element<'a, Msg> {
+    match item.unplayed_count.filter(|c| *c > 0) {
         Some(count) => ui::badge_row(count.to_string(), theme::WATCH),
         None if item.played => poster_mark(Icon::Check, theme::INK, theme::OK),
         None => Space::new().into(),
-    };
-    let dark = theme::alpha(theme::INK, 0.82);
-    let track: Element<'a, Msg> = if row_data.unsure {
-        poster_mark(Icon::Question, theme::WARN, dark)
+    }
+}
+
+/// The connection to AniList: the knot for a match, a question mark for an unsure one.
+fn track_mark<'a>(row_data: &LibraryRow, background: Color) -> Element<'a, Msg> {
+    if row_data.unsure {
+        poster_mark(Icon::Question, theme::WARN, background)
     } else if !row_data.mappings.is_empty() {
-        poster_mark(Icon::Knot, theme::TRACK, dark)
+        poster_mark(Icon::Knot, theme::TRACK, background)
     } else {
         Space::new().into()
+    }
+}
+
+/// Share of a started movie or episode that has been watched.
+fn watched_share(item: &LibraryItem) -> Option<f32> {
+    item.runtime_secs
+        .filter(|r| *r > 0 && item.position_secs > 0)
+        .map(|r| item.position_secs as f32 / r as f32)
+}
+
+/// Status dot and short form of the AniList entry.
+fn entry_line<'a>(entry: &ListEntry, max: usize) -> Element<'a, Msg> {
+    row![
+        container(Space::new())
+            .width(6)
+            .height(6)
+            .style(theme::solid(theme::status_color(entry.status), 3.0)),
+        ui::muted(ui::ellipsize(&entry_summary(entry), max)),
+    ]
+    .spacing(6)
+    .align_y(Center)
+    .into()
+}
+
+fn poster_card<'a>(app: &'a App, row_data: &'a LibraryRow, size: ViewSize) -> Element<'a, Msg> {
+    let item = &row_data.item;
+    let (width, height) = card_size(size);
+    let key = item.has_poster.then(|| ImageKey::Poster(item.id.clone()));
+    let image = ui::picture(&app.images, key, width, height, want);
+    let image = ui::with_progress(image, watched_share(item), (width, height), theme::WATCH);
+    let title_size = match size {
+        ViewSize::Small => theme::T_SMALL,
+        ViewSize::Medium => theme::T_BODY,
+        ViewSize::Large => theme::T_CARD,
     };
+    // Roughly what fits on one line of the card at this font size.
+    let fits = (width / (title_size * 0.5)) as usize;
     let subtitle: Element<'a, Msg> = match (&row_data.entry, item.year) {
-        (Some(entry), _) => row![
-            container(Space::new())
-                .width(6)
-                .height(6)
-                .style(theme::solid(theme::status_color(entry.status), 3.0)),
-            ui::muted(ui::ellipsize(&entry_summary(entry), 22)),
-        ]
-        .spacing(6)
-        .align_y(Center)
-        .into(),
+        (Some(entry), _) => entry_line(entry, (width / 7.0) as usize),
         (None, Some(year)) => ui::muted(year.to_string()),
         (None, None) => ui::muted(""),
     };
     button(
         column![
+            // Top right the state in Jellyfin, bottom left the connection to AniList.
             stack![
                 image,
-                container(watch)
-                    .width(CARD_WIDTH)
+                container(watch_mark(item))
+                    .width(width)
                     .padding(6)
-                    .align_right(CARD_WIDTH),
-                container(track)
-                    .width(CARD_WIDTH)
-                    .height(CARD_HEIGHT)
+                    .align_right(width),
+                container(track_mark(row_data, theme::alpha(theme::INK, 0.82)))
+                    .width(width)
+                    .height(height)
                     .padding(6)
                     .align_y(Bottom),
             ],
             column![
-                text(ui::ellipsize(&item.name, 21))
-                    .size(theme::T_SMALL)
+                text(ui::ellipsize(&item.name, fits))
+                    .size(title_size)
                     .font(theme::MEDIUM),
                 subtitle,
             ]
@@ -519,7 +567,84 @@ fn poster_card<'a>(app: &'a App, row_data: &'a LibraryRow) -> Element<'a, Msg> {
     .into()
 }
 
-/// Die Zeilen, die zur Suche passen.
+/// One title as a row: poster, name and facts, then the state on AniList and in Jellyfin.
+fn list_row<'a>(app: &'a App, row_data: &'a LibraryRow, size: ViewSize) -> Element<'a, Msg> {
+    let item = &row_data.item;
+    let thumb = thumb_size(size);
+    let key = item.has_poster.then(|| ImageKey::Poster(item.id.clone()));
+    let image = ui::picture(&app.images, key, thumb.0, thumb.1, want);
+    let image = ui::with_progress(image, watched_share(item), thumb, theme::WATCH);
+    let title_size = match size {
+        ViewSize::Small => theme::T_BODY,
+        ViewSize::Medium => theme::T_CARD,
+        ViewSize::Large => theme::T_TITLE,
+    };
+    let mut facts: Vec<String> = item.year.iter().map(i32::to_string).collect();
+    facts.push(
+        match item.kind {
+            ItemKind::Movie => "Movie",
+            _ => "Series",
+        }
+        .to_owned(),
+    );
+    if let Some(rating) = item.community_rating {
+        facts.push(format!("★ {rating:.1}"));
+    }
+    if size != ViewSize::Small {
+        facts.extend(item.genres.iter().take(3).cloned());
+    }
+    let mut about = column![
+        text(ui::ellipsize(&item.name, 80))
+            .size(title_size)
+            .font(theme::MEDIUM),
+        ui::muted(facts.join(" · ")),
+    ]
+    .spacing(4);
+    if size == ViewSize::Large
+        && let Some(overview) = item.overview.as_deref().filter(|o| !o.is_empty())
+    {
+        about = about.push(
+            container(
+                text(ui::ellipsize(overview, 220))
+                    .size(theme::T_SMALL)
+                    .line_height(1.45)
+                    .color(theme::alpha(theme::PAPER, 0.72)),
+            )
+            .max_width(720),
+        );
+    }
+    let tracking: Element<'a, Msg> = match &row_data.entry {
+        Some(entry) => entry_line(entry, 28),
+        None if row_data.mappings.is_empty() => ui::muted("Not on AniList"),
+        None => ui::muted("Matched"),
+    };
+    button(
+        row![
+            image,
+            container(about).width(Fill),
+            row![track_mark(row_data, theme::RAISED), tracking]
+                .spacing(theme::S2)
+                .align_y(Center)
+                .width(LIST_TRACK_WIDTH),
+            container(watch_mark(item))
+                .width(LIST_WATCH_WIDTH)
+                .align_right(LIST_WATCH_WIDTH),
+        ]
+        .spacing(theme::S4)
+        .align_y(Center),
+    )
+    .width(Fill)
+    .padding([theme::S2, theme::S3])
+    .style(theme::row_button)
+    .on_press(Msg::Open(item.clone()))
+    .into()
+}
+
+/// Column widths of the list view.
+const LIST_TRACK_WIDTH: f32 = 230.0;
+const LIST_WATCH_WIDTH: f32 = 44.0;
+
+/// The rows that match the search.
 fn visible(app: &App) -> Vec<&LibraryRow> {
     let needle = app.library.search.trim().to_lowercase();
     app.library
@@ -545,11 +670,31 @@ fn grid<'a>(app: &'a App, rows: Vec<&'a LibraryRow>) -> Element<'a, Msg> {
             )
         };
     }
+    let view = app.library.view;
+    if view.mode == ViewMode::List {
+        let lines: Vec<Element<'a, Msg>> =
+            rows.iter().map(|r| list_row(app, r, view.size)).collect();
+        return ui::scroll(
+            container(
+                container(ui::divided(lines))
+                    .padding(theme::S1)
+                    .width(Fill)
+                    .style(theme::surface),
+            )
+            // The grid moves out by the card inset; the list lines up with the toolbar.
+            .padding(iced::Padding {
+                top: 0.0,
+                right: CARD_PADDING,
+                bottom: theme::S6,
+                left: CARD_PADDING,
+            }),
+        );
+    }
     responsive(move |size| {
-        let card = CARD_WIDTH + 2.0 * CARD_PADDING;
+        let card = card_size(view.size).0 + 2.0 * CARD_PADDING;
         let columns = (((size.width + GAP) / (card + GAP)).floor() as usize).max(1);
         let lines = rows.chunks(columns).map(|chunk| {
-            row(chunk.iter().map(|r| poster_card(app, r)))
+            row(chunk.iter().map(|r| poster_card(app, r, view.size)))
                 .spacing(GAP)
                 .into()
         });
@@ -572,7 +717,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
             bottom: 0.0,
             left: ui::PAGE_PADDING,
         }),
-        // Die Karten haben einen eigenen Rand, deshalb rückt das Raster um diesen ein.
+        // The cards have their own inset, so the grid moves out by it.
         container(grid(app, rows)).padding(iced::Padding {
             top: 0.0,
             right: ui::PAGE_PADDING - CARD_PADDING,

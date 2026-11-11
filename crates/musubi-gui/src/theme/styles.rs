@@ -187,6 +187,18 @@ pub fn hero_fade(_: &Theme) -> container::Style {
     ])
 }
 
+/// Fades only the lower part of the Home hero into the page, so the picture itself stays
+/// clear and the text at the bottom stays readable.
+pub fn hero_floor(_: &Theme) -> container::Style {
+    vertical(&[
+        (0.0, alpha(INK, 0.18)),
+        (0.4, alpha(INK, 0.06)),
+        (0.68, alpha(INK, 0.52)),
+        (0.9, alpha(INK, 0.94)),
+        (1.0, INK),
+    ])
+}
+
 /// Dunkelt die linke Seite eines Hintergrundbilds ab, damit Text darauf lesbar ist.
 pub fn hero_side(_: &Theme) -> container::Style {
     let linear = gradient::Linear::new(Radians(std::f32::consts::FRAC_PI_2))
@@ -379,6 +391,50 @@ pub fn ghost_button(_: &Theme, status: button::Status) -> button::Style {
         button::Status::Hovered => flat(OVERLAY, PAPER, border),
         button::Status::Pressed => flat(RAISED, PAPER, border),
         _ => flat(alpha(SURFACE, 0.6), PAPER, border),
+    }
+}
+
+/// The "+1" action on covers and rows: solid teal with a dark ring, so it reads on any
+/// artwork.
+pub fn count_up(_: &Theme, status: button::Status) -> button::Style {
+    let ring = Border {
+        color: alpha(INK, 0.78),
+        width: 2.0,
+        radius: PILL.into(),
+    };
+    let (background, text_color) = match status {
+        button::Status::Disabled => (mix(RAISED, INK, 0.2), FAINT),
+        button::Status::Hovered => (mix(TRACK, Color::WHITE, 0.22), INK),
+        button::Status::Pressed => (mix(TRACK, INK, 0.16), INK),
+        button::Status::Active => (TRACK, INK),
+    };
+    button::Style {
+        shadow: Shadow {
+            color: Color::from_rgba(0.0, 0.0, 0.0, 0.5),
+            offset: Vector::new(0.0, 2.0),
+            blur_radius: 8.0,
+        },
+        ..flat(background, text_color, ring)
+    }
+}
+
+/// Frame around a segmented control such as the view switch.
+pub fn segmented(_: &Theme) -> container::Style {
+    container::Style {
+        background: Some(INK.into()),
+        border: outlined(LINE_STRONG, R_MD),
+        ..container::Style::default()
+    }
+}
+
+/// One option of a segmented control.
+pub fn segment(active: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_, status| match (active, status) {
+        (true, _) => flat(OVERLAY, PAPER, rounded(R_SM)),
+        (false, button::Status::Hovered | button::Status::Pressed) => {
+            flat(RAISED, PAPER, rounded(R_SM))
+        }
+        _ => flat(Color::TRANSPARENT, MUTED, rounded(R_SM)),
     }
 }
 

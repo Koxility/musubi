@@ -250,6 +250,8 @@ impl App {
             config,
             core,
         };
+        app.anilist.view = app.config.ui.anilist;
+        app.library.view = app.config.ui.library;
         if video.is_none() {
             app.toast(
                 "GStreamer is not available, video playback is disabled. See the README.",
@@ -290,6 +292,14 @@ impl App {
 
     pub fn toast(&mut self, text: impl Into<String>, ok: bool) {
         self.toast = Some((text.into(), ok, Instant::now()));
+    }
+
+    /// Changes the config and keeps the GUI's copy in step, e.g. for a view preference.
+    pub fn remember(&mut self, change: impl FnOnce(&mut Config)) {
+        if let Err(error) = self.core.update_config(change) {
+            self.toast(format!("Could not save that setting: {error}"), false);
+        }
+        self.config = self.core.config();
     }
 
     pub fn report(&mut self, result: Result<(), String>) {

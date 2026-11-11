@@ -36,6 +36,7 @@ The GUI is pure Rust without system toolkits like GTK and looks the same on ever
 - The design system lives in `theme/`: `tokens.rs` names every colour, spacing step, radius and font size, `fonts.rs` embeds Sora (titles) and Hanken Grotesk (text), and `styles.rs` builds all widget styles from those tokens. Pages use the tokens and the components in `ui.rs` instead of literals.
 - Two accent colours carry meaning. Red (`WATCH`) marks watching in Jellyfin: play, resume, playback progress. Teal (`TRACK`) marks tracking on AniList: status, list progress, sync. The knot mark shows where a title is connected to both.
 - Icons are hand-made SVGs in `icons.rs`, rendered by resvg. A test parses every icon with usvg so a broken one cannot silently disappear.
+- Library and AniList offer a grid and a list in three sizes. The choice is stored per page in `config.toml` (`[ui.library]`, `[ui.anilist]`) through `Core::update_config`.
 - Posters load only when they scroll into view. The cache files are named `*.img`, so the GUI reads them as bytes; when given a path, Iced picks the decoder by file extension.
 - Iced has no virtualized grids, so the library builds widgets for every title.
 - Iced keeps widget state such as scroll position as long as the same widget type sits at the same place in the tree. On every view change (page switch, detail page opened or closed), the nesting depth of the page alternates so that the new view starts fresh. `keyed_column` is not an option here: in Iced 0.14 it diffs equally long child lists without a type check and panics when the page type changes.
@@ -128,7 +129,7 @@ The rate limiter starts at the measured limit of 30 requests per minute, adopts 
 
 - **Credentials.** By default they live in `credentials.toml` with mode 0600 in a 0700 directory, written atomically. More permissive modes abort startup. Secret Service can be chosen in the config.
 - **Passwords and tokens.** Passwords are never stored. Tokens are held as `SecretString` and never appear in logs.
-- **AniList login.** It uses the implicit grant, so no client secret is needed. The loopback server listens on 127.0.0.1 only, checks the Host header, and uses a random path per login. It accepts the token only after verifying it with `Viewer`.
+- **AniList login.** It uses the implicit grant, so no client secret is needed. The client ID comes from the user's config or, failing that, from the one baked in at build time (`MUSUBI_ANILIST_CLIENT_ID`); either way the token AniList issues is personal to the user who approved. The loopback server listens on 127.0.0.1 only, checks the Host header, and uses a random path per login. It accepts the token only after verifying it with `Viewer`.
 
 ## Known limitations
 

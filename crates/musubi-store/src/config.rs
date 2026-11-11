@@ -50,7 +50,7 @@ pub enum AniListLoginFlow {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AniListConfig {
-    /// Client-ID der eigenen AniList-Anwendung.
+    /// Client ID of the user's own AniList app. Without it, Musubi uses its built-in app.
     pub client_id: Option<String>,
     pub login_flow: AniListLoginFlow,
     pub loopback_port: u16,
@@ -115,11 +115,58 @@ pub struct SecretsConfig {
     pub backend: SecretBackend,
 }
 
+/// How a page lays out its titles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ViewMode {
+    #[default]
+    Grid,
+    List,
+}
+
+/// Size preset for covers, cards and rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ViewSize {
+    Small,
+    #[default]
+    Medium,
+    Large,
+}
+
+impl ViewSize {
+    pub const ALL: [Self; 3] = [Self::Small, Self::Medium, Self::Large];
+}
+
+/// The view a user picked for one page.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(default)]
+pub struct ViewConfig {
+    pub mode: ViewMode,
+    pub size: ViewSize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct UiConfig {
-    /// Die geführte Einrichtung wurde abgeschlossen oder bewusst beendet.
+    /// The guided setup was completed or dismissed on purpose.
     pub setup_completed: bool,
+    pub library: ViewConfig,
+    /// The AniList lists. They start as a list, because that view shows score and notes.
+    pub anilist: ViewConfig,
+}
+
+impl Default for UiConfig {
+    fn default() -> Self {
+        Self {
+            setup_completed: false,
+            library: ViewConfig::default(),
+            anilist: ViewConfig {
+                mode: ViewMode::List,
+                size: ViewSize::Medium,
+            },
+        }
+    }
 }
 
 impl Config {
@@ -187,6 +234,10 @@ mod tests {
         let mut config = Config::default();
         config.jellyfin.url = Some("https://example.org".into());
         config.secrets.backend = SecretBackend::SecretService;
+        config.ui.library = ViewConfig {
+            mode: ViewMode::List,
+            size: ViewSize::Large,
+        };
         config.save(&path).unwrap();
         assert_eq!(Config::load(&path).unwrap(), config);
     }

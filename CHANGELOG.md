@@ -6,11 +6,19 @@ All notable changes to Musubi are documented here. The format follows [Keep a Ch
 
 ### Added
 
+- **View options** in Library and AniList: grid or list, each in three sizes, switched at the top right and remembered per page. The Library gains a list view with year, genres, AniList status and episodes left.
 - **One-click AniList login.** Builds with the built-in AniList client only need *Log in with AniList*: approve Musubi in the browser and AniList issues your personal token. A waiting login can be cancelled. Your own API client and a pasted token remain available under the advanced options.
+
+### Changed
+
+- **Home is larger.** The hero for what to continue follows the window and shows the whole backdrop instead of a cropped strip; posters, cards and text in the rows are bigger. Rows also scroll by dragging the thin bar below the cards.
+- **Airing on the AniList overview** uses the same cover cards as "Anime in progress", with the countdown next to the episode count.
+- The `+1` button is a solid, labelled pill that is always visible in the top-right corner of a cover and in list rows.
 
 ### Fixed
 
 - The Profile score distribution showed every score in the column for 10 and nothing else for users who score out of 10, 5 or 3. AniList reports these scores on the user's own scale; they are now converted.
+- Backdrops no longer spill over the content below them with the software renderer.
 
 ## [0.2.0] - 2026-11-11
 
