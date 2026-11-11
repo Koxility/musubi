@@ -55,7 +55,7 @@ impl fmt::Display for StatusOption {
     }
 }
 
-fn status_options(kind: MediaKind) -> Vec<StatusOption> {
+pub fn status_options(kind: MediaKind) -> Vec<StatusOption> {
     ListStatus::ALL
         .iter()
         .map(|s| StatusOption(*s, kind))

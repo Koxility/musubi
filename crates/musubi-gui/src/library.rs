@@ -1,14 +1,14 @@
 //! Library as a grid or a list, and the detail page of a title.
 
 use iced::widget::{
-    Space, button, center, column, container, responsive, row, stack, text, text_input,
+    Space, button, center, column, container, pick_list, responsive, row, stack, text, text_input,
 };
 use iced::{Bottom, Center, Color, Element, Fill, Task};
-use musubi_core::domain::ListEntry;
 use musubi_core::domain::{
     ItemKind, Library, LibraryFilters, LibraryItem, LibraryQuery, LibrarySort, Mapping,
     MappingSource, is_unsure, season_mappings,
 };
+use musubi_core::domain::{ListEntry, ListStatus, MediaKind};
 use musubi_core::{EpisodeRow, LibraryRow, ViewConfig, ViewMode, ViewSize};
 
 use crate::app::{App, Message, Page};
@@ -58,6 +58,9 @@ pub struct Detail {
     episodes: Vec<EpisodeRow>,
     loading: bool,
     season: Option<u32>,
+    /// The list a match that is not tracked yet would be added to.
+    add_status: ListStatus,
+    adding: bool,
 }
 
 pub struct State {
@@ -128,6 +131,11 @@ pub enum Msg {
     Play(LibraryItem, Option<String>),
     SetPlayed(String, bool),
     EditEntry(LibraryItem),
+    /// Which list "Add to AniList" puts the title on.
+    AddStatus(ListStatus),
+    /// Adds the AniList work with this ID to the chosen list.
+    AddToList(i64),
+    Added(Result<String, String>),
     Map(LibraryItem),
     ConfirmMapping(String),
 }
@@ -226,6 +234,8 @@ pub fn open_detail(app: &mut App, item: LibraryItem) -> Task<Message> {
         episodes: vec![],
         loading: series,
         season: None,
+        add_status: ListStatus::Planning,
+        adding: false,
     });
     if series {
         load_episodes(app, id)
@@ -303,6 +313,42 @@ pub fn update(app: &mut App, msg: Msg) -> Task<Message> {
         Msg::EditEntry(item) => {
             let season = selected_season(app, &item.id);
             anilist::open_editor_for(app, &item, season);
+        }
+        Msg::AddStatus(status) => {
+            if let Some(detail) = &mut app.library.detail {
+                detail.add_status = status;
+            }
+        }
+        Msg::AddToList(media_id) => {
+            let Some(detail) = &mut app.library.detail else {
+                return Task::none();
+            };
+            detail.adding = true;
+            let status = detail.add_status;
+            let core = app.core.clone();
+            return ui::perform(
+                async move {
+                    let title = core.add_media_to_list(media_id, status).await?;
+                    Ok(format!(
+                        "Added {title} to {}",
+                        status.label(MediaKind::Anime)
+                    ))
+                },
+                |r| Message::Library(Msg::Added(r)),
+            );
+        }
+        Msg::Added(result) => {
+            if let Some(detail) = &mut app.library.detail {
+                detail.adding = false;
+            }
+            match result {
+                Ok(message) => {
+                    // The grid shows the entry too, so it has to learn about the new one.
+                    sync_mappings(app);
+                    app.toast(message, true);
+                }
+                Err(error) => app.toast(error, false),
+            }
         }
         Msg::Map(item) => {
             let season = selected_season(app, &item.id);
@@ -966,6 +1012,31 @@ fn anilist_summary<'a>(app: &'a App, item: &'a LibraryItem) -> Element<'a, Msg> 
     }
     if entry.is_some() {
         actions = actions.push(ui::secondary("Edit entry", Msg::EditEntry(item.clone())));
+    } else if let (Some(mapping), Some(detail), true) =
+        (mapping, &app.library.detail, app.auth.anilist_logged_in)
+    {
+        // Matched but not tracked yet: pick a list and add it right here.
+        let options: Vec<anilist::StatusOption> = anilist::status_options(MediaKind::Anime);
+        let selected = anilist::StatusOption(detail.add_status, MediaKind::Anime);
+        actions = actions
+            .push(
+                pick_list(options, Some(selected), |option| Msg::AddStatus(option.0))
+                    .text_size(theme::T_SMALL)
+                    .padding([7, 12])
+                    .style(theme::pick)
+                    .menu_style(theme::pick_menu),
+            )
+            .push(ui::tool(
+                Icon::Plus,
+                if detail.adding {
+                    "Adding…"
+                } else {
+                    "Add to AniList"
+                },
+                (!detail.adding).then_some(Msg::AddToList(mapping.media_id)),
+                theme::track,
+                theme::INK,
+            ));
     }
     actions = actions.push(ui::secondary(
         if mapping.is_some() {
@@ -981,7 +1052,7 @@ fn anilist_summary<'a>(app: &'a App, item: &'a LibraryItem) -> Element<'a, Msg> 
             .align_y(Center),
     )
     .padding([theme::S3, theme::S4])
-    .max_width(820)
+    .max_width(960)
     .style(theme::strip(cord))
     .into()
 }

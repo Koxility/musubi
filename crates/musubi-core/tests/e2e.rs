@@ -997,3 +997,61 @@ async fn profile_statistics_are_fetched_cached_and_cleared_on_logout() {
     core.logout_anilist().await.unwrap();
     assert!(core.cached_profile().await.unwrap().is_none());
 }
+
+#[tokio::test]
+async fn matches_show_english_titles_and_can_be_added_to_a_list() {
+    let dir = tempfile::tempdir().unwrap();
+    let anilist = MockServer::start().await;
+    let frieren = json!({
+        "id": 101, "type": "ANIME", "format": "TV", "episodes": 28, "status": "FINISHED",
+        "title": {"romaji": "Sousou no Frieren", "english": "Frieren: Beyond Journey's End",
+            "native": "葬送のフリーレン"}
+    });
+    Mock::given(method("POST"))
+        .respond_with(move |request: &Request| {
+            let body: Value = serde_json::from_slice(&request.body).unwrap();
+            let query = body["query"].as_str().unwrap();
+            let data = if query.contains("SaveMediaListEntry") {
+                json!({"SaveMediaListEntry": {"id": 900, "status": body["variables"]["status"],
+                    "score": 0, "progress": 0, "media": frieren.clone()}})
+            } else if query.contains("Viewer") {
+                json!({"Viewer": {"id": 7, "name": "eden",
+                    "mediaListOptions": {"scoreFormat": "POINT_100"}}})
+            } else if query.contains("id_in") {
+                json!({"Page": {"media": [frieren.clone()]}})
+            } else {
+                json!({"Media": frieren.clone()})
+            };
+            ResponseTemplate::new(200)
+                .insert_header("X-RateLimit-Limit", "90")
+                .set_body_json(json!({"data": data}))
+        })
+        .mount(&anilist)
+        .await;
+    let core = core(dir.path(), &anilist).await;
+    core.login_anilist_pin("tok").await.unwrap();
+
+    // A match stored by an older version carries the Romaji title.
+    let old = Mapping {
+        title: "Sousou no Frieren".into(),
+        ..mapping()
+    };
+    core.set_mappings("s1", vec![old]).await.unwrap();
+    core.refresh_mapping_titles().await.unwrap();
+    let stored = core.mappings_for("s1").await.unwrap();
+    assert_eq!(stored[0].title, "Frieren: Beyond Journey's End");
+
+    // The matched work is not on the list yet and gets added by its ID.
+    assert!(core.entry_for(101).is_none());
+    let title = core
+        .add_media_to_list(101, ListStatus::Planning)
+        .await
+        .unwrap();
+    assert_eq!(title, "Frieren: Beyond Journey's End");
+    let entry = core.entry_for(101).expect("the entry shows at once");
+    assert_eq!(entry.status, ListStatus::Planning);
+    assert_eq!(
+        entry.media.title.preferred(),
+        "Frieren: Beyond Journey's End"
+    );
+}

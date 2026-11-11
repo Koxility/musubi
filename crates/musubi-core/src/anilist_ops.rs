@@ -172,6 +172,16 @@ impl Core {
         self.inner.queue_patch(patch).await
     }
 
+    /// Puts a work the user only knows by its ID on their list, e.g. the match of a
+    /// Jellyfin title that is not tracked yet. Returns the title it was added under.
+    pub async fn add_media_to_list(&self, media_id: i64, status: ListStatus) -> Result<String> {
+        let session = self.require_anilist()?;
+        let media = session.client.media(media_id).await?;
+        let title = media.title.preferred().to_owned();
+        self.add_to_list(media, status).await?;
+        Ok(title)
+    }
+
     pub async fn delete_entry(&self, entry: &ListEntry) -> Result<()> {
         self.require_anilist()?;
         if entry.id == 0 {
