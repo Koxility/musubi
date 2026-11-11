@@ -33,9 +33,10 @@ const META_TITLES_VERSION: &str = "mapping_titles_version";
 /// Version 1 stores the English title of a match where AniList has one, not the Romaji one.
 const TITLES_VERSION: u32 = 1;
 /// Version 2 matches every season on its own. Version 3 lets one entry span seasons despite
-/// wrong season IDs and skips an episode 0 kept in Specials. Older automatic mappings are
-/// re-planned once.
-const MATCHING_VERSION: u32 = 3;
+/// wrong season IDs and skips an episode 0 kept in Specials. Version 4 no longer mistakes a
+/// newest season that is missing episodes for that case. Older automatic mappings are
+/// re-planned once, and titles left without a match are searched again once.
+const MATCHING_VERSION: u32 = 4;
 
 struct MatchRunGuard<'a>(&'a AtomicBool);
 
@@ -128,7 +129,8 @@ fn outcome_of(seasons: &[SeasonInfo], mappings: &[Mapping]) -> MatchOutcome {
 }
 
 impl Core {
-    /// Staffeln eines Titels samt Specials (Staffel 0). Filme gelten als Staffel 1 mit einer Folge.
+    /// The seasons of a title including specials (season 0). A movie counts as season 1 with
+    /// one episode.
     async fn seasons_of(&self, item: &LibraryItem) -> Result<Vec<SeasonInfo>> {
         if item.kind == ItemKind::Movie {
             return Ok(vec![SeasonInfo {
@@ -148,7 +150,13 @@ impl Core {
                 .last_mut()
                 .filter(|s| s.season == episode.season_number)
             {
-                Some(span) => span.count += 1,
+                // The length runs to the highest number, not over the files present: an
+                // episode missing in between must not shift the seasons after it.
+                Some(span) => {
+                    span.count = span
+                        .count
+                        .max((episode.number + 1).saturating_sub(span.first_episode));
+                }
                 None => spans.push(SeasonSpan {
                     season: episode.season_number,
                     first_episode: episode.number,
@@ -156,7 +164,7 @@ impl Core {
                 }),
             }
         }
-        // Die Metadaten sind eine Hilfe, ohne sie geht es auch.
+        // The metadata helps, but matching works without it.
         let metas = match session.client.seasons(&session.user_id, &item.id).await {
             Ok(metas) => metas,
             Err(error) => {
@@ -347,6 +355,7 @@ impl Core {
             .find(|s| s.span.season == 0)
             .map_or(0, |s| s.span.count);
         let regular = seasons.iter().filter(|s| s.span.season > 0);
+        let last_season = seasons.iter().map(|s| s.span.season).max();
         for (index, info) in regular.enumerate() {
             let span = info.span;
             let kept: Vec<Mapping> = keep
@@ -416,7 +425,8 @@ impl Core {
 
             used.insert(anchor.link.media_id);
             let chain = self.season_chain(&anchor, span.count, &mut used).await?;
-            let skipped = leading_surplus(&chain, anchor.used, span.count, specials);
+            let followed = last_season.is_some_and(|last| last > span.season);
+            let skipped = leading_surplus(&chain, anchor.used, span.count, specials, followed);
             let plan = plan_season(
                 &item.id,
                 &span,
@@ -675,7 +685,8 @@ impl Core {
 
     /// Matches all titles still open. Only one run at a time per core.
     ///
-    /// Titles without a match are only searched again with `retry_unmatched`. Without a change
+    /// Titles without a match are only searched again with `retry_unmatched`, or once after
+    /// an update that changed the matching rules. Without a change
     /// there is no `LibraryChanged`, because the interface starts this run itself. After an
     /// update, automatic mappings of series with several seasons are re-planned once, season
     /// by season.
@@ -691,12 +702,15 @@ impl Core {
         let rows = self.library(&LibraryQuery::default()).await?;
         let adopted = self.adopt_open_reviews(&rows).await?;
         let reviews = self.inner.db.reviews().await?;
-        let tried: HashSet<String> = if retry_unmatched {
+        let outdated = self.matching_version().await? < MATCHING_VERSION;
+        // Newer rules may find what the old ones did not, so they get one go at every title
+        // that was left without a match.
+        let tried: HashSet<String> = if retry_unmatched || outdated {
             HashSet::new()
         } else {
             reviews.iter().map(|r| r.jellyfin_id.clone()).collect()
         };
-        let upgrade: Vec<&LibraryRow> = if self.matching_version().await? < MATCHING_VERSION {
+        let upgrade: Vec<&LibraryRow> = if outdated {
             rows.iter()
                 .filter(|r| {
                     r.item.kind == ItemKind::Series

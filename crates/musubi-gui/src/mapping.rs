@@ -153,6 +153,8 @@ pub enum Msg {
     Edit(FormEdit),
     SubmitEdit,
     Unmap(String),
+    /// Hands a title back to automatic matching, replacing whatever it is matched to now.
+    AutoMatch(Box<LibraryItem>),
     UnmapSeason(String, u32),
     Close,
 }
@@ -381,6 +383,13 @@ pub fn update(app: &mut App, msg: Msg) -> Task<Message> {
                 }
             }
         }
+        Msg::AutoMatch(item) => {
+            app.mapping.modal = None;
+            return ui::perform(
+                async move { core.auto_match(&item).await.map(|_| ()) },
+                Message::Notify,
+            );
+        }
         Msg::Unmap(id) => {
             app.mapping.modal = None;
             return ui::perform(async move { core.unmap(&id).await }, Message::Notify);
@@ -415,22 +424,7 @@ fn season_line<'a>(
     season: u32,
     mappings: &[&'a Mapping],
 ) -> Element<'a, Msg> {
-    let parts: Vec<String> = mappings
-        .iter()
-        .map(|m| {
-            format!(
-                "E{}–{} → {}{}",
-                m.ep_start,
-                m.ep_end.map_or("…".to_owned(), |e| e.to_string()),
-                ui::ellipsize(&m.title, 54),
-                if m.offset == 0 {
-                    String::new()
-                } else {
-                    format!(" ({:+})", m.offset)
-                },
-            )
-        })
-        .collect();
+    let parts: Vec<String> = mappings.iter().map(|m| range_label(m)).collect();
     let unsure = mappings.iter().any(|m| m.source == MappingSource::Guess);
     let mut heading = row![
         text(season_label(season))
@@ -768,7 +762,15 @@ fn change_body<'a>(app: &'a App, view: ChangeView<'a>) -> Column<'a, Msg> {
     if let Some(error) = view.error {
         body = body.push(ui::error_line(error));
     }
-    let mut actions = row![].spacing(theme::S2).align_y(Center);
+    let mut actions = row![ui::with_tip(
+        ui::secondary(
+            "Match automatically",
+            Msg::AutoMatch(Box::new(view.item.clone())),
+        ),
+        "Matches every season of this title again and replaces its current matches",
+    )]
+    .spacing(theme::S2)
+    .align_y(Center);
     if let Some(first) = current.first() {
         let remove = match view.scope.0 {
             Some(season) => Msg::UnmapSeason(view.item.id.clone(), season),
@@ -780,12 +782,7 @@ fn change_body<'a>(app: &'a App, view: ChangeView<'a>) -> Column<'a, Msg> {
             Some(season) => {
                 let lines = current.iter().map(|mapping| {
                     row![
-                        ui::muted(format!(
-                            "E{}–{} → {}",
-                            mapping.ep_start,
-                            mapping.ep_end.map_or("…".to_owned(), |e| e.to_string()),
-                            ui::ellipsize(&mapping.title, 54),
-                        )),
+                        ui::muted(range_label(mapping)),
                         ui::spacer(),
                         ui::secondary("Edit…", Msg::OpenEdit(Box::new((*mapping).clone()))),
                     ]
@@ -814,6 +811,38 @@ fn change_body<'a>(app: &'a App, view: ChangeView<'a>) -> Column<'a, Msg> {
             .push(ui::spacer())
             .push(ui::secondary("Close", Msg::Close)),
     )
+}
+
+/// The AniList episodes a match stands for, e.g. "episodes 21–41". `None` when they are the
+/// Jellyfin numbers anyway, so only matches that count differently say so.
+pub fn anilist_range(mapping: &Mapping) -> Option<String> {
+    if mapping.offset == 0 {
+        return None;
+    }
+    let first = mapping.anilist_episode(mapping.ep_start)?;
+    Some(
+        match mapping.ep_end.and_then(|end| mapping.anilist_episode(end)) {
+            Some(last) if last == first => format!("episode {first}"),
+            Some(last) => format!("episodes {first}–{last}"),
+            None => format!("from episode {first}"),
+        },
+    )
+}
+
+/// One match in words, the same wherever it is shown: the Jellyfin episodes, the AniList
+/// entry and, where they differ, the entry's episodes. A season in the middle of a long
+/// entry would otherwise read as if it started at the entry's first episode.
+pub fn range_label(mapping: &Mapping) -> String {
+    let label = format!(
+        "E{}–{} → {}",
+        mapping.ep_start,
+        mapping.ep_end.map_or("…".to_owned(), |e| e.to_string()),
+        ui::ellipsize(&mapping.title, 54),
+    );
+    match anilist_range(mapping) {
+        Some(range) => format!("{label}, {range}"),
+        None => label,
+    }
 }
 
 /// Template for one more AniList entry in a season, starting after its last mapped episode.
@@ -931,6 +960,31 @@ mod tests {
             confidence: 0.8,
             title: "Show".into(),
         }
+    }
+
+    #[test]
+    fn a_match_names_the_anilist_episodes_where_they_differ() {
+        let at = |ep_start, ep_end, offset| Mapping {
+            ep_start,
+            ep_end,
+            offset,
+            ..mapping()
+        };
+        // Season 2 of a long entry, a season's first entry, a later part, an open end.
+        assert_eq!(
+            range_label(&at(1, Some(21), 20)),
+            "E1–21 → Show, episodes 21–41"
+        );
+        assert_eq!(range_label(&at(1, Some(20), 0)), "E1–20 → Show");
+        assert_eq!(
+            range_label(&at(14, Some(26), -13)),
+            "E14–26 → Show, episodes 1–13"
+        );
+        assert_eq!(
+            range_label(&at(1, None, 40)),
+            "E1–… → Show, from episode 41"
+        );
+        assert_eq!(range_label(&at(5, Some(5), 2)), "E5–5 → Show, episode 7");
     }
 
     #[test]

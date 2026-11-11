@@ -812,6 +812,11 @@ fn episode_row<'a>(
     if row_data.counted_on_anilist {
         meta = meta.push(ui::tag("On AniList", theme::TRACK));
     }
+    if let Some((_, number)) = row_data.anilist
+        && number != episode.number
+    {
+        meta = meta.push(ui::muted(format!("AniList episode {number}")));
+    }
     let (watched_color, watched_tip) = if episode.played {
         (theme::OK, "Mark as unwatched")
     } else {
@@ -944,10 +949,6 @@ fn further_entries<'a>(
             continue;
         }
         seen.push(Some(mapping.media_id));
-        let range = match mapping.ep_end {
-            Some(end) => format!("Ep {}–{end}", mapping.ep_start),
-            None => format!("From ep {}", mapping.ep_start),
-        };
         let progress = match app.core.entry_for(mapping.media_id) {
             Some(entry) => format!(
                 "{} of {}",
@@ -960,8 +961,8 @@ fn further_entries<'a>(
             None => "not on your AniList yet".to_owned(),
         };
         lines = lines.push(ui::muted(format!(
-            "{range} · {} · {progress}",
-            ui::ellipsize(&mapping.title, 40)
+            "{} · {progress}",
+            mapping::range_label(mapping)
         )));
     }
     lines
@@ -1011,6 +1012,10 @@ fn anilist_summary<'a>(app: &'a App, item: &'a LibraryItem) -> Element<'a, Msg> 
             ]
             .spacing(theme::S2)
             .align_y(Center);
+            // A season in the middle of a long entry says which of its episodes it holds.
+            if let Some(range) = mapping::anilist_range(mapping) {
+                facts = facts.push(ui::muted(format!("This season: {range}")));
+            }
             if entry.score_raw > 0
                 && let Some(viewer) = app.core.viewer()
             {

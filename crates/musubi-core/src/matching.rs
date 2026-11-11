@@ -331,8 +331,16 @@ impl Carry {
 /// recap that Jellyfin files under Specials; without the skip every later episode of the
 /// season is off by that much. Only assumed when the season is split over several entries
 /// that together hold a few episodes too many and the library has specials to account for them.
-pub fn leading_surplus(chain: &[ChainLink], used: u32, count: u32, specials: u32) -> u32 {
-    if chain.len() < 2 || used > 0 {
+/// It also has to be `followed` by a later season: the newest season is often just missing
+/// its latest episodes, which looks the same by count but leaves the start where it is.
+pub fn leading_surplus(
+    chain: &[ChainLink],
+    used: u32,
+    count: u32,
+    specials: u32,
+    followed: bool,
+) -> u32 {
+    if chain.len() < 2 || used > 0 || !followed {
         return 0;
     }
     let Some(total) = chain.iter().map(|l| l.episodes).sum::<Option<u32>>() else {
@@ -670,7 +678,9 @@ mod tests {
     #[test]
     fn episode_zero_in_specials_is_skipped_at_the_season_start() {
         let chain = [link(10, Some(13)), link(20, Some(12))];
-        assert_eq!(leading_surplus(&chain, 0, 24, 2), 1);
+        assert_eq!(leading_surplus(&chain, 0, 24, 2, true), 1);
+        // The newest season is rather missing its last episode than hiding an episode 0.
+        assert_eq!(leading_surplus(&chain, 0, 24, 2, false), 0);
         let plan = plan_season("x", &span(2, 1, 24), &chain, 1, MappingSource::Title, 1.0);
         assert_eq!(resolve_episode(&plan.mappings, 2, 1), Some((10, 2)));
         assert_eq!(resolve_episode(&plan.mappings, 2, 12), Some((10, 13)));
@@ -679,16 +689,16 @@ mod tests {
         assert_eq!(plan.unmapped, 0);
 
         // No specials, an exact fit, a single entry, an open end or a carried entry: no skip.
-        assert_eq!(leading_surplus(&chain, 0, 24, 0), 0);
-        assert_eq!(leading_surplus(&chain, 0, 25, 2), 0);
-        assert_eq!(leading_surplus(&chain[..1], 0, 12, 2), 0);
+        assert_eq!(leading_surplus(&chain, 0, 24, 0, true), 0);
+        assert_eq!(leading_surplus(&chain, 0, 25, 2, true), 0);
+        assert_eq!(leading_surplus(&chain[..1], 0, 12, 2, true), 0);
         assert_eq!(
-            leading_surplus(&[link(10, Some(13)), link(20, None)], 0, 24, 2),
+            leading_surplus(&[link(10, Some(13)), link(20, None)], 0, 24, 2, true),
             0
         );
-        assert_eq!(leading_surplus(&chain, 3, 21, 2), 0);
+        assert_eq!(leading_surplus(&chain, 3, 21, 2, true), 0);
         // A larger gap is another part, not a bonus episode.
-        assert_eq!(leading_surplus(&chain, 0, 20, 9), 0);
+        assert_eq!(leading_surplus(&chain, 0, 20, 9, true), 0);
     }
 
     #[test]

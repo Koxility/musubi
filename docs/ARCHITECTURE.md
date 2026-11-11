@@ -97,11 +97,12 @@ AniList usually has one entry per season, often per cour, while Jellyfin counts 
 - A work spanning several seasons is continued.
 - Absolute episode numbering is handled through the offset.
 - If the count differs by at most two episodes (a recap or bonus episode), the next season still starts at episode 1 of its own entry instead of drifting.
-- If a season split over several entries has one or two episodes fewer than they hold and the library has that many specials, the surplus is skipped at the start of the first entry (`leading_surplus`): AniList counts an episode 0 that Jellyfin keeps under Specials. This is a heuristic; the exact editor overrides it.
+- If a season split over several entries has one or two episodes fewer than they hold, the library has that many specials and a later season follows, the surplus is skipped at the start of the first entry (`leading_surplus`): AniList counts an episode 0 that Jellyfin keeps under Specials. The newest season is left alone, because it is usually just missing its latest episodes. This is a heuristic; the exact editor overrides it.
+- A season's length is its highest episode number minus its first plus one, not the number of files. An entry that spans several seasons is counted on by these lengths (season 14 episode 1 of a show whose first thirteen seasons hold 265 episodes is episode 266), so an episode missing inside a season does not shift the seasons after it. Episodes missing at the end of a season cannot be seen and do.
 
 Every match covers an episode range and carries an offset.
 
-Matching runs at startup, after login and on *Refresh* for every title not tried before. When the matching rules change (`matching_version`, currently 3), automatic matches of multi-season series are re-planned once. The first season keeps its entry, and manual seasons are never overwritten. The change dialog matches a single season or all seasons at once.
+Matching runs at startup, after login and on *Refresh* for every title not tried before. When the matching rules change (`matching_version`, currently 4), automatic matches of multi-season series are re-planned once, and titles left without a match are searched again once. The first season keeps its entry, and manual seasons are never overwritten. The change dialog matches a single season or all seasons at once, and *Match automatically* hands a title back to the automatic rules, replacing its manual matches.
 
 ### Sync rules
 

@@ -10,6 +10,15 @@ applications="$prefix/share/applications"
 
 install -Dm755 "$here/musubi" "$bin/musubi"
 install -Dm644 "$here/musubi.svg" "$prefix/share/icons/hicolor/scalable/apps/musubi.svg"
+# Desktops cache icons and only look again when the theme folder itself changes. Without
+# this, an upgrade keeps showing the previous icon.
+icons="$prefix/share/icons/hicolor"
+touch "$icons"
+# Only an existing cache is refreshed: creating one would hide icons that other apps add
+# later without updating it.
+if [ -f "$icons/icon-theme.cache" ] && command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    gtk-update-icon-cache -q -t -f "$icons" >/dev/null 2>&1 || true
+fi
 
 # The launcher entry points at the installed binary directly, so it works even when the
 # desktop session's PATH does not include $bin.
@@ -18,6 +27,9 @@ sed "s|^Exec=musubi |Exec=$bin/musubi |" "$here/musubi.desktop" > "$applications
 chmod 644 "$applications/musubi.desktop"
 if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database "$applications" >/dev/null 2>&1 || true
+fi
+if command -v kbuildsycoca6 >/dev/null 2>&1; then
+    kbuildsycoca6 >/dev/null 2>&1 || true
 fi
 
 echo "Installed musubi to $bin/musubi"
