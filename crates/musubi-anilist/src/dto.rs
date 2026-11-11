@@ -1,7 +1,8 @@
 //! Antwort-Strukturen von AniList und ihre Umwandlung in Fachtypen.
 
 use musubi_domain::{
-    FuzzyDate, ListEntry, ListStatus, Media, MediaKind, MediaTitle, NextAiring, ScoreFormat, Viewer,
+    FuzzyDate, KindStats, ListEntry, ListStatus, Media, MediaKind, MediaTitle, NextAiring, Profile,
+    ScoreFormat, StatBucket, StatusCount, Viewer,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -247,6 +248,137 @@ impl From<ViewerDto> for Viewer {
 pub struct ViewerData {
     #[serde(rename = "Viewer")]
     pub viewer: ViewerDto,
+}
+
+/// Eine Gruppe der Statistik. Je nach Abfrage steht der Schlüssel in einem anderen Feld.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct StatDto {
+    pub status: Option<ListStatus>,
+    pub score: Option<u32>,
+    pub format: Option<String>,
+    pub genre: Option<String>,
+    pub release_year: Option<i32>,
+    pub count: Option<u32>,
+    pub mean_score: Option<f32>,
+    pub minutes_watched: Option<u64>,
+    pub chapters_read: Option<u64>,
+}
+
+impl From<StatDto> for StatBucket {
+    fn from(d: StatDto) -> Self {
+        let key = d
+            .genre
+            .or(d.format)
+            .or(d.release_year.map(|y| y.to_string()))
+            .or(d.score.map(|s| s.to_string()))
+            .unwrap_or_default();
+        Self {
+            key,
+            count: d.count.unwrap_or(0),
+            mean_score: d.mean_score.unwrap_or(0.0),
+            amount: d.minutes_watched.or(d.chapters_read).unwrap_or(0),
+        }
+    }
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct KindStatsDto {
+    pub count: Option<u32>,
+    pub mean_score: Option<f32>,
+    pub standard_deviation: Option<f32>,
+    pub minutes_watched: Option<u64>,
+    pub episodes_watched: Option<u32>,
+    pub chapters_read: Option<u32>,
+    pub volumes_read: Option<u32>,
+    pub statuses: Option<Vec<Option<StatDto>>>,
+    pub scores: Option<Vec<Option<StatDto>>>,
+    pub formats: Option<Vec<Option<StatDto>>>,
+    pub genres: Option<Vec<Option<StatDto>>>,
+    pub release_years: Option<Vec<Option<StatDto>>>,
+}
+
+impl From<KindStatsDto> for KindStats {
+    fn from(d: KindStatsDto) -> Self {
+        let buckets = |list: Option<Vec<Option<StatDto>>>| -> Vec<StatBucket> {
+            list.unwrap_or_default()
+                .into_iter()
+                .flatten()
+                .map(StatBucket::from)
+                .collect()
+        };
+        let statuses = d
+            .statuses
+            .unwrap_or_default()
+            .into_iter()
+            .flatten()
+            .filter_map(|s| {
+                Some(StatusCount {
+                    status: s.status?,
+                    count: s.count.unwrap_or(0),
+                })
+            })
+            .collect();
+        Self {
+            count: d.count.unwrap_or(0),
+            mean_score: d.mean_score.unwrap_or(0.0),
+            standard_deviation: d.standard_deviation.unwrap_or(0.0),
+            minutes_watched: d.minutes_watched.unwrap_or(0),
+            episodes_watched: d.episodes_watched.unwrap_or(0),
+            chapters_read: d.chapters_read.unwrap_or(0),
+            volumes_read: d.volumes_read.unwrap_or(0),
+            statuses,
+            scores: buckets(d.scores),
+            formats: buckets(d.formats),
+            genres: buckets(d.genres),
+            release_years: buckets(d.release_years),
+        }
+    }
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct StatisticsDto {
+    pub anime: Option<KindStatsDto>,
+    pub manga: Option<KindStatsDto>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct AvatarDto {
+    pub large: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileDto {
+    pub name: String,
+    pub site_url: Option<String>,
+    pub banner_image: Option<String>,
+    pub avatar: Option<AvatarDto>,
+    pub statistics: Option<StatisticsDto>,
+}
+
+impl From<ProfileDto> for Profile {
+    fn from(d: ProfileDto) -> Self {
+        let statistics = d.statistics.unwrap_or_default();
+        Self {
+            name: d.name,
+            avatar_url: d.avatar.and_then(|a| a.large),
+            banner_url: d.banner_image,
+            site_url: d.site_url,
+            anime: statistics.anime.unwrap_or_default().into(),
+            manga: statistics.manga.unwrap_or_default().into(),
+            fetched_at: 0,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ProfileData {
+    #[serde(rename = "Viewer")]
+    pub viewer: ProfileDto,
 }
 
 #[derive(Debug, Deserialize)]

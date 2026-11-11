@@ -32,6 +32,33 @@ query {
   }
 }";
 
+/// Profil und Statistik. Die Sortierung übernimmt die GUI, AniList liefert alle Gruppen.
+pub const PROFILE: &str = "
+query {
+  Viewer {
+    name siteUrl bannerImage
+    avatar { large }
+    statistics {
+      anime {
+        count meanScore standardDeviation minutesWatched episodesWatched
+        statuses { status count }
+        scores { score count }
+        formats { format count meanScore minutesWatched }
+        genres { genre count meanScore minutesWatched }
+        releaseYears { releaseYear count meanScore minutesWatched }
+      }
+      manga {
+        count meanScore standardDeviation chaptersRead volumesRead
+        statuses { status count }
+        scores { score count }
+        formats { format count meanScore chaptersRead }
+        genres { genre count meanScore chaptersRead }
+        releaseYears { releaseYear count meanScore chaptersRead }
+      }
+    }
+  }
+}";
+
 pub const LIST_COLLECTION: &str = "
 query ($userId: Int, $type: MediaType, $chunk: Int) {
   MediaListCollection(userId: $userId, type: $type, chunk: $chunk, perChunk: 500) {

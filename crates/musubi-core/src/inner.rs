@@ -14,6 +14,7 @@ const META_USER_ID: &str = "jellyfin.user_id";
 const META_USER_NAME: &str = "jellyfin.user_name";
 const META_DEVICE_ID: &str = "jellyfin.device_id";
 pub(crate) const CACHE_VIEWER: &str = "anilist.viewer";
+pub(crate) const CACHE_PROFILE: &str = "anilist.profile";
 
 pub(crate) fn list_cache_key(kind: MediaKind) -> String {
     format!("anilist.list.{}", kind.as_api())

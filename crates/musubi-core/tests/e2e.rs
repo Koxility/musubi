@@ -924,3 +924,71 @@ async fn a_manual_season_survives_the_upgrade_and_the_next_season_searches_itsel
     );
     assert_eq!(season_media(&mappings, 2), vec![(3, MappingSource::Title)]);
 }
+
+#[tokio::test]
+async fn profile_statistics_are_fetched_cached_and_cleared_on_logout() {
+    let dir = tempfile::tempdir().unwrap();
+    let anilist = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(|request: &Request| {
+            let body: Value = serde_json::from_slice(&request.body).unwrap();
+            let data = if body["query"].as_str().unwrap().contains("statistics") {
+                json!({"Viewer": {
+                    "name": "eden", "siteUrl": "https://anilist.co/user/eden",
+                    "bannerImage": null, "avatar": {"large": "https://img.example/a.png"},
+                    "statistics": {
+                        "anime": {
+                            "count": 3, "meanScore": 81.5, "standardDeviation": 6.0,
+                            "minutesWatched": 2880, "episodesWatched": 120,
+                            "statuses": [{"status": "COMPLETED", "count": 2},
+                                {"status": "CURRENT", "count": 1}],
+                            "scores": [{"score": 80, "count": 2}, {"score": 85, "count": 1}],
+                            "formats": [{"format": "TV", "count": 3, "meanScore": 81.5,
+                                "minutesWatched": 2880}],
+                            "genres": [{"genre": "Drama", "count": 2, "meanScore": 84.0,
+                                "minutesWatched": 1900}, null],
+                            "releaseYears": [{"releaseYear": 2019, "count": 3, "meanScore": 81.5,
+                                "minutesWatched": 2880}]
+                        },
+                        "manga": {"count": 1, "chaptersRead": 40, "volumesRead": 4,
+                            "genres": [{"genre": "Fantasy", "count": 1, "chaptersRead": 40}]}
+                    }
+                }})
+            } else {
+                json!({"Viewer": {"id": 7, "name": "eden",
+                    "mediaListOptions": {"scoreFormat": "POINT_100"}}})
+            };
+            ResponseTemplate::new(200)
+                .insert_header("X-RateLimit-Limit", "90")
+                .set_body_json(json!({"data": data}))
+        })
+        .mount(&anilist)
+        .await;
+    let core = core(dir.path(), &anilist).await;
+    core.login_anilist_pin("token").await.unwrap();
+    assert!(core.cached_profile().await.unwrap().is_none());
+
+    let profile = core.refresh_profile().await.unwrap();
+
+    assert_eq!(profile.name, "eden");
+    assert_eq!(
+        profile.avatar_url.as_deref(),
+        Some("https://img.example/a.png")
+    );
+    assert_eq!(profile.anime.count, 3);
+    assert_eq!(profile.anime.days_watched(), 2.0);
+    assert_eq!(profile.anime.status_count(ListStatus::Completed), 2);
+    assert_eq!(profile.anime.score_counts()[7], (80, 3));
+    assert_eq!(profile.anime.genres[0].key, "Drama");
+    assert_eq!(profile.anime.genres.len(), 1);
+    assert_eq!(profile.anime.release_years[0].key, "2019");
+    assert_eq!(profile.manga.genres[0].amount, 40);
+    assert!(profile.fetched_at > 0);
+
+    // Die letzte Kopie liegt im Cache und ist ohne weiteren Abruf lesbar.
+    assert_eq!(core.cached_profile().await.unwrap(), Some(profile));
+
+    // Beim Abmelden verschwindet sie mit den übrigen AniList-Daten.
+    core.logout_anilist().await.unwrap();
+    assert!(core.cached_profile().await.unwrap().is_none());
+}

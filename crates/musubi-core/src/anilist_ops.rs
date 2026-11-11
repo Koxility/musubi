@@ -1,9 +1,11 @@
 //! AniList-Verwaltung, unabhängig von Jellyfin.
 
-use musubi_domain::{EntryPatch, FuzzyDate, ListEntry, ListStatus, Media, MediaKind, Viewer};
+use musubi_domain::{
+    EntryPatch, FuzzyDate, ListEntry, ListStatus, Media, MediaKind, Profile, Viewer,
+};
 use musubi_store::OutboxOp;
 
-use crate::inner::{CACHE_VIEWER, Inner, list_cache_key, now};
+use crate::inner::{CACHE_PROFILE, CACHE_VIEWER, Inner, list_cache_key, now};
 use crate::{Core, CoreError, CoreEvent, Result};
 
 /// Lokaler Platzhalter, bis AniList die echte Eintrags-ID liefert.
@@ -96,6 +98,23 @@ impl Core {
             .await?;
         self.inner.set_viewer(Some(viewer.clone()));
         Ok(viewer)
+    }
+
+    /// Das zuletzt abgerufene Profil mit Statistik, auch offline verfügbar.
+    pub async fn cached_profile(&self) -> Result<Option<Profile>> {
+        Ok(self.inner.db.cache_get::<Profile>(CACHE_PROFILE).await?)
+    }
+
+    /// Holt Profil und Statistik neu von AniList und merkt sie sich für später.
+    pub async fn refresh_profile(&self) -> Result<Profile> {
+        let session = self.require_anilist()?;
+        let mut profile = session.client.profile().await?;
+        profile.fetched_at = now();
+        self.inner
+            .db
+            .cache_put(CACHE_PROFILE, &profile, now())
+            .await?;
+        Ok(profile)
     }
 
     async fn viewer_or_fetch(&self) -> Result<Viewer> {

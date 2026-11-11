@@ -481,9 +481,148 @@ impl Viewer {
     }
 }
 
+/// Eine Gruppe der Statistik, z. B. ein Genre, ein Format oder ein Erscheinungsjahr.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct StatBucket {
+    /// Name der Gruppe, wie AniList ihn liefert, z. B. `Drama`, `TV_SHORT`, `2019`.
+    pub key: String,
+    pub count: u32,
+    /// Mittlere Bewertung von 0 bis 100, 0 ohne Bewertungen.
+    pub mean_score: f32,
+    /// Gesehene Minuten bei Anime, gelesene Kapitel bei Manga.
+    pub amount: u64,
+}
+
+/// Anzahl der Einträge mit einem Status.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct StatusCount {
+    pub status: ListStatus,
+    pub count: u32,
+}
+
+/// Statistik über alle Anime oder alle Manga eines Nutzers.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct KindStats {
+    pub count: u32,
+    /// Mittlere Bewertung von 0 bis 100.
+    pub mean_score: f32,
+    pub standard_deviation: f32,
+    pub minutes_watched: u64,
+    pub episodes_watched: u32,
+    pub chapters_read: u32,
+    pub volumes_read: u32,
+    pub statuses: Vec<StatusCount>,
+    /// Anzahl je Bewertung, Schlüssel 10 bis 100.
+    pub scores: Vec<StatBucket>,
+    pub formats: Vec<StatBucket>,
+    pub genres: Vec<StatBucket>,
+    pub release_years: Vec<StatBucket>,
+}
+
+impl KindStats {
+    /// Gesehene Zeit in Tagen.
+    pub fn days_watched(&self) -> f32 {
+        self.minutes_watched as f32 / 1_440.0
+    }
+
+    /// Anzahl der Einträge mit diesem Status.
+    pub fn status_count(&self, status: ListStatus) -> u32 {
+        self.statuses
+            .iter()
+            .filter(|s| s.status == status)
+            .map(|s| s.count)
+            .sum()
+    }
+
+    /// Anzahl je Bewertungsstufe von 10 bis 100. Stufen ohne Einträge haben 0, damit das
+    /// Diagramm immer alle zehn Balken zeigt.
+    pub fn score_counts(&self) -> [(u32, u32); 10] {
+        let mut counts = [(0, 0); 10];
+        for (index, slot) in counts.iter_mut().enumerate() {
+            slot.0 = (index as u32 + 1) * 10;
+        }
+        for bucket in &self.scores {
+            let Ok(score) = bucket.key.parse::<u32>() else {
+                continue;
+            };
+            // Feinere Formate wie 85 zählen zur Stufe darunter, 0 heißt unbewertet.
+            if let Some(slot) = (score / 10)
+                .checked_sub(1)
+                .and_then(|i| counts.get_mut(i as usize))
+            {
+                slot.1 += bucket.count;
+            }
+        }
+        counts
+    }
+}
+
+/// Anteil von `value` am größten Wert der Reihe, für die Länge eines Balkens.
+pub fn share_of_max(value: u32, max: u32) -> f32 {
+    if max == 0 {
+        0.0
+    } else {
+        (value as f32 / max as f32).min(1.0)
+    }
+}
+
+/// Öffentliches Profil des angemeldeten Nutzers mit seiner Statistik.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Profile {
+    pub name: String,
+    pub avatar_url: Option<String>,
+    pub banner_url: Option<String>,
+    pub site_url: Option<String>,
+    pub anime: KindStats,
+    pub manga: KindStats,
+    /// Unix-Zeit des Abrufs, damit die GUI das Alter einer Kopie aus dem Cache zeigen kann.
+    pub fetched_at: i64,
+}
+
+impl Profile {
+    pub fn stats(&self, kind: MediaKind) -> &KindStats {
+        match kind {
+            MediaKind::Anime => &self.anime,
+            MediaKind::Manga => &self.manga,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn score_counts_always_cover_ten_steps() {
+        let bucket = |key: &str, count| StatBucket {
+            key: key.to_owned(),
+            count,
+            ..StatBucket::default()
+        };
+        let stats = KindStats {
+            scores: vec![
+                bucket("70", 4),
+                bucket("85", 2),
+                bucket("80", 1),
+                bucket("0", 9),
+            ],
+            ..KindStats::default()
+        };
+        let counts = stats.score_counts();
+        assert_eq!(counts[0], (10, 0));
+        assert_eq!(counts[6], (70, 4));
+        assert_eq!(counts[7], (80, 3));
+        assert_eq!(counts[9], (100, 0));
+    }
+
+    #[test]
+    fn bar_share_is_relative_to_the_largest_value() {
+        assert_eq!(share_of_max(5, 10), 0.5);
+        assert_eq!(share_of_max(12, 10), 1.0);
+        assert_eq!(share_of_max(3, 0), 0.0);
+    }
 
     #[test]
     fn score_round_trips_in_each_format() {
