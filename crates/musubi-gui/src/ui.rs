@@ -3,23 +3,24 @@
 use iced::widget::scrollable::{Direction, Scrollbar};
 use iced::widget::tooltip::Position;
 use iced::widget::{
-    Space, button, center, column, container, image, opaque, row, scrollable, sensor, space, stack,
-    svg, text, text_input, tooltip,
+    Column, Row, Space, button, center, column, container, image, opaque, pick_list, progress_bar,
+    row, scrollable, sensor, space, stack, svg, text, text_input, toggler, tooltip,
 };
-use iced::{Center, Color, ContentFit, Element, Fill, Font, Length, Padding, Task, font};
+use iced::{Center, Color, ContentFit, Element, Fill, FillPortion, Length, Padding, Task};
 
 use crate::icons::Icon;
 use crate::images::{ImageCache, ImageKey};
-use crate::theme;
+use crate::theme::{self, S1, S2, S3, S4, S5, S6};
 
-/// Halbfette Variante der Standardschrift für Titel.
-pub const SEMIBOLD: Font = Font {
-    weight: font::Weight::Semibold,
-    ..Font::DEFAULT
-};
+pub use crate::theme::SEMIBOLD;
 
 /// Button-Stil als Funktion, wie ihn `button::style` erwartet.
 pub type ButtonStyle = fn(&iced::Theme, button::Status) -> button::Style;
+
+/// Seitenrand, den alle Seiten ohne Titelbild teilen.
+pub const PAGE_PADDING: f32 = S6;
+
+// Icons ---------------------------------------------------------------------------------
 
 /// Ein Icon in fester Größe und Farbe.
 pub fn icon<'a, M: 'a>(icon: Icon, size: f32, color: Color) -> Element<'a, M> {
@@ -34,7 +35,7 @@ pub fn icon<'a, M: 'a>(icon: Icon, size: f32, color: Color) -> Element<'a, M> {
 pub fn with_tip<'a, M: 'a>(content: impl Into<Element<'a, M>>, label: &'a str) -> Element<'a, M> {
     tooltip(
         content,
-        container(text(label).size(12))
+        container(text(label).size(theme::T_LABEL))
             .padding([5, 9])
             .style(theme::tooltip),
         Position::Top,
@@ -55,10 +56,7 @@ pub fn icon_button<'a, M: Clone + 'a>(
     let tint = if message.is_some() {
         color
     } else {
-        Color {
-            a: color.a * 0.35,
-            ..color
-        }
+        theme::alpha(color, color.a * 0.35)
     };
     let side = size * 1.8;
     let content = button(center(icon(glyph, size, tint)).width(side).height(side))
@@ -79,9 +77,9 @@ pub fn icon_label<'a, M: Clone + 'a>(
     button(
         row![
             icon(glyph, 18.0, color),
-            text(label).size(15).font(SEMIBOLD).color(color)
+            text(label).size(theme::T_BODY).font(SEMIBOLD).color(color)
         ]
-        .spacing(8)
+        .spacing(S2)
         .align_y(Center),
     )
     .padding([10, 22])
@@ -89,6 +87,30 @@ pub fn icon_label<'a, M: Clone + 'a>(
     .on_press(message)
     .into()
 }
+
+/// Kleiner Button mit Icon und Beschriftung für Werkzeugleisten.
+pub fn tool<'a, M: Clone + 'a>(
+    glyph: Icon,
+    label: &'a str,
+    message: Option<M>,
+    style: ButtonStyle,
+    color: Color,
+) -> Element<'a, M> {
+    button(
+        row![
+            icon(glyph, 15.0, color),
+            text(label).size(theme::T_SMALL).font(theme::MEDIUM)
+        ]
+        .spacing(6)
+        .align_y(Center),
+    )
+    .padding([7, 12])
+    .style(style)
+    .on_press_maybe(message)
+    .into()
+}
+
+// Texthilfen ----------------------------------------------------------------------------
 
 /// Teilt Wiedergabetitel wie „Serie S01E02 - Name“ in Serie und Folge.
 pub fn split_title(title: &str) -> (&str, Option<String>) {
@@ -160,6 +182,208 @@ pub fn format_time(seconds: f64) -> String {
     }
 }
 
+// Text ----------------------------------------------------------------------------------
+
+/// Seitentitel.
+pub fn page_title<'a, M: 'a>(label: impl text::IntoFragment<'a>) -> Element<'a, M> {
+    text(label)
+        .size(theme::T_PAGE)
+        .font(theme::DISPLAY)
+        .color(theme::PAPER)
+        .into()
+}
+
+/// Überschrift eines Abschnitts.
+pub fn heading<'a, M: 'a>(label: impl text::IntoFragment<'a>) -> Element<'a, M> {
+    text(label)
+        .size(theme::T_TITLE)
+        .font(theme::DISPLAY)
+        .color(theme::PAPER)
+        .into()
+}
+
+/// Überschrift mit einer Zahl dahinter, z. B. „Watching 12“.
+pub fn heading_count<'a, M: 'a>(
+    label: impl text::IntoFragment<'a>,
+    count: usize,
+) -> Element<'a, M> {
+    row![
+        heading(label),
+        text(count.to_string())
+            .size(theme::T_SMALL)
+            .font(theme::MEDIUM)
+            .color(theme::FAINT),
+    ]
+    .spacing(S2)
+    .align_y(iced::Bottom)
+    .into()
+}
+
+pub fn muted<'a, M: 'a>(label: impl text::IntoFragment<'a>) -> Element<'a, M> {
+    text(label).size(theme::T_SMALL).color(theme::MUTED).into()
+}
+
+/// Beschriftung über einem Feld oder einer Kennzahl.
+pub fn label<'a, M: 'a>(value: impl text::IntoFragment<'a>) -> Element<'a, M> {
+    text(value)
+        .size(theme::T_LABEL)
+        .font(theme::MEDIUM)
+        .color(theme::MUTED)
+        .into()
+}
+
+pub fn error_line<'a, M: 'a>(label: impl text::IntoFragment<'a>) -> Element<'a, M> {
+    text(label).size(theme::T_SMALL).color(theme::BAD).into()
+}
+
+// Buttons -------------------------------------------------------------------------------
+
+fn text_button<'a, M: Clone + 'a>(
+    label: &'a str,
+    message: M,
+    style: ButtonStyle,
+) -> Element<'a, M> {
+    button(text(label).size(theme::T_SMALL).font(SEMIBOLD))
+        .padding([8, 16])
+        .style(style)
+        .on_press(message)
+        .into()
+}
+
+/// Hauptaktion rund um AniList und allgemeine Bestätigungen.
+pub fn primary<'a, M: Clone + 'a>(label: &'a str, message: M) -> Element<'a, M> {
+    text_button(label, message, theme::track)
+}
+
+/// Hauptaktion rund ums Ansehen.
+pub fn watch<'a, M: Clone + 'a>(label: &'a str, message: M) -> Element<'a, M> {
+    text_button(label, message, theme::watch)
+}
+
+pub fn secondary<'a, M: Clone + 'a>(label: &'a str, message: M) -> Element<'a, M> {
+    text_button(label, message, theme::secondary)
+}
+
+pub fn quiet<'a, M: Clone + 'a>(label: &'a str, message: M) -> Element<'a, M> {
+    text_button(label, message, theme::quiet)
+}
+
+pub fn danger<'a, M: Clone + 'a>(label: &'a str, message: M) -> Element<'a, M> {
+    text_button(label, message, theme::danger)
+}
+
+/// Auswahl-Chip in einer Kordelfarbe.
+pub fn chip<'a, M: Clone + 'a>(
+    label: impl text::IntoFragment<'a>,
+    active: bool,
+    message: M,
+    cord: Color,
+) -> Element<'a, M> {
+    button(text(label).size(theme::T_SMALL).font(theme::MEDIUM))
+        .padding([5, 12])
+        .style(theme::chip(active, cord))
+        .on_press(message)
+        .into()
+}
+
+/// Reiter mit Unterstreichung in der Kordelfarbe.
+pub fn tabs<'a, M: Clone + 'a>(
+    items: impl IntoIterator<Item = (String, bool, M)>,
+    cord: Color,
+) -> Element<'a, M> {
+    let tabs = items.into_iter().map(|(label, active, message)| {
+        let marker = if active { cord } else { Color::TRANSPARENT };
+        button(
+            column![
+                text(label)
+                    .size(theme::T_BODY)
+                    .font(if active { SEMIBOLD } else { theme::MEDIUM }),
+                container(Space::new())
+                    .width(Fill)
+                    .height(2)
+                    .style(theme::solid(marker, 1.0)),
+            ]
+            .spacing(7)
+            .width(Length::Shrink),
+        )
+        .padding(iced::padding::top(6))
+        .style(theme::tab(active))
+        .on_press(message)
+        .into()
+    });
+    row(tabs).spacing(S5).into()
+}
+
+// Eingaben ------------------------------------------------------------------------------
+
+pub fn field<'a, M: Clone + 'a>(
+    name: &'a str,
+    value: &'a str,
+    on_input: impl Fn(String) -> M + 'a,
+) -> Element<'a, M> {
+    column![
+        label(name),
+        text_input("", value)
+            .on_input(on_input)
+            .size(theme::T_BODY)
+            .padding([8, 10])
+            .style(theme::input),
+    ]
+    .spacing(6)
+    .into()
+}
+
+pub fn secret_field<'a, M: Clone + 'a>(
+    name: &'a str,
+    value: &'a str,
+    on_input: impl Fn(String) -> M + 'a,
+    on_submit: Option<M>,
+) -> Element<'a, M> {
+    column![
+        label(name),
+        text_input("", value)
+            .secure(true)
+            .on_input(on_input)
+            .on_submit_maybe(on_submit)
+            .size(theme::T_BODY)
+            .padding([8, 10])
+            .style(theme::input),
+    ]
+    .spacing(6)
+    .into()
+}
+
+/// Auswahlliste im Stil der App.
+pub fn pick<'a, M: Clone + 'a>(
+    options: Vec<String>,
+    selected: Option<String>,
+    on_select: impl Fn(String) -> M + 'a,
+) -> iced::widget::PickList<'a, String, Vec<String>, String, M> {
+    pick_list(options, selected, on_select)
+        .text_size(theme::T_SMALL)
+        .padding([7, 12])
+        .style(theme::pick)
+        .menu_style(theme::pick_menu)
+}
+
+/// Schalter mit Beschriftung.
+pub fn toggle<'a, M: 'a>(
+    name: &'a str,
+    value: bool,
+    on_toggle: impl Fn(bool) -> M + 'a,
+) -> Element<'a, M> {
+    toggler(value)
+        .label(name)
+        .size(18)
+        .spacing(S3)
+        .text_size(theme::T_BODY)
+        .style(theme::toggle)
+        .on_toggle(on_toggle)
+        .into()
+}
+
+// Bilder und Fortschritt ----------------------------------------------------------------
+
 /// Bild mit Platzhalter, das beim ersten Sichtbarwerden nachgeladen wird.
 pub fn picture<'a, M: Clone + 'a>(
     images: &'a ImageCache,
@@ -177,12 +401,18 @@ pub fn picture<'a, M: Clone + 'a>(
             .into();
     };
     let content: Element<'a, M> = match images.get(&key) {
-        Some(handle) => image(handle.clone())
-            .width(width)
-            .height(height)
-            .content_fit(ContentFit::Cover)
-            .border_radius(6.0)
-            .into(),
+        // Der Container beschneidet: Ein Bild mit `Fill` ragt sonst über seine Höhe hinaus.
+        Some(handle) => container(
+            image(handle.clone())
+                .width(width)
+                .height(height)
+                .content_fit(ContentFit::Cover)
+                .border_radius(theme::R_SM),
+        )
+        .width(width)
+        .height(height)
+        .clip(true)
+        .into(),
         None => container(Space::new())
             .width(width)
             .height(height)
@@ -196,99 +426,211 @@ pub fn picture<'a, M: Clone + 'a>(
         .into()
 }
 
-pub fn heading<'a, M: 'a>(label: impl text::IntoFragment<'a>) -> Element<'a, M> {
-    text(label).size(20).color(theme::TEXT).into()
-}
-
-pub fn muted<'a, M: 'a>(label: impl text::IntoFragment<'a>) -> Element<'a, M> {
-    text(label).size(13).color(theme::MUTED).into()
-}
-
-pub fn error_line<'a, M: 'a>(label: impl text::IntoFragment<'a>) -> Element<'a, M> {
-    text(label).size(14).color(theme::RED).into()
-}
-
-pub fn primary<'a, M: Clone + 'a>(label: &'a str, message: M) -> Element<'a, M> {
-    button(text(label).size(14))
-        .padding([8, 16])
-        .style(theme::primary)
-        .on_press(message)
+/// Dünner Fortschrittsbalken in einer Kordelfarbe.
+pub fn progress<'a, M: 'a>(value: f32, width: impl Into<Length>, color: Color) -> Element<'a, M> {
+    progress_bar(0.0..=1.0, value.clamp(0.0, 1.0))
+        .length(width)
+        .girth(3)
+        .style(theme::progress(color))
         .into()
 }
 
-pub fn secondary<'a, M: Clone + 'a>(label: &'a str, message: M) -> Element<'a, M> {
-    button(text(label).size(14))
-        .padding([8, 16])
-        .style(theme::secondary)
-        .on_press(message)
-        .into()
-}
-
-pub fn danger<'a, M: Clone + 'a>(label: &'a str, message: M) -> Element<'a, M> {
-    button(text(label).size(14))
-        .padding([8, 16])
-        .style(theme::danger)
-        .on_press(message)
-        .into()
-}
-
-pub fn field<'a, M: Clone + 'a>(
-    label: &'a str,
-    value: &'a str,
-    on_input: impl Fn(String) -> M + 'a,
+/// Legt einen Fortschrittsbalken an den unteren Rand eines Bildes.
+pub fn with_progress<'a, M: 'a>(
+    picture: Element<'a, M>,
+    value: Option<f32>,
+    size: (f32, f32),
+    color: Color,
 ) -> Element<'a, M> {
-    column![
-        text(label).size(12).color(theme::MUTED),
-        text_input("", value)
-            .on_input(on_input)
-            .padding(8)
-            .style(theme::input),
-    ]
-    .spacing(4)
-    .into()
+    match value {
+        Some(value) => stack![
+            picture,
+            iced::widget::bottom(progress(value, size.0, color))
+                .width(size.0)
+                .height(size.1)
+        ]
+        .into(),
+        None => picture,
+    }
 }
 
-pub fn secret_field<'a, M: Clone + 'a>(
-    label: &'a str,
-    value: &'a str,
-    on_input: impl Fn(String) -> M + 'a,
-    on_submit: Option<M>,
-) -> Element<'a, M> {
-    column![
-        text(label).size(12).color(theme::MUTED),
-        text_input("", value)
-            .secure(true)
-            .on_input(on_input)
-            .on_submit_maybe(on_submit)
-            .padding(8)
-            .style(theme::input),
-    ]
-    .spacing(4)
-    .into()
+// Aufbau --------------------------------------------------------------------------------
+
+/// Senkrecht scrollender Bereich mit der schmalen Leiste der App.
+pub fn scroll<'a, M: 'a>(content: impl Into<Element<'a, M>>) -> Element<'a, M> {
+    scrollable(content)
+        .width(Fill)
+        .height(Fill)
+        .style(theme::scroll)
+        .into()
 }
 
-/// Waagerechte Leiste ohne sichtbaren Scrollbalken.
-pub fn shelf<'a, M: 'a>(
+/// Kopf einer Seite: Titel, kurze Erklärung und Aktionen rechts.
+pub fn page_header<'a, M: 'a>(
     title: &'a str,
+    hint: Option<String>,
+    actions: Vec<Element<'a, M>>,
+) -> Element<'a, M> {
+    let mut titles = column![page_title(title)].spacing(S1);
+    if let Some(hint) = hint {
+        titles = titles.push(container(muted(hint)).max_width(640));
+    }
+    row![titles, spacer(), row(actions).spacing(S2).align_y(Center)]
+        .align_y(Center)
+        .spacing(S4)
+        .into()
+}
+
+/// Abschnitt aus Überschrift und Inhalt.
+pub fn section<'a, M: 'a>(
+    title: Element<'a, M>,
+    content: impl Into<Element<'a, M>>,
+) -> Element<'a, M> {
+    column![title, content.into()].spacing(S3).into()
+}
+
+/// Waagerechte Leiste ohne sichtbaren Scrollbalken. Die Pfeile im Kopf blättern, weil ein
+/// Mausrad nur senkrecht scrollt.
+pub fn shelf<'a, M: Clone + 'a>(
+    title: &'a str,
+    id: &'static str,
     items: Vec<Element<'a, M>>,
     padding: Padding,
+    card_inset: f32,
+    on_scroll: fn(&'static str, f32) -> M,
 ) -> Element<'a, M> {
+    let count = items.len();
+    // Karten haben einen eigenen Rand; ihr Bild soll trotzdem bündig unter der Überschrift stehen.
+    let cards = Padding {
+        left: padding.left - card_inset,
+        ..padding
+    };
+    let arrow = |glyph, label, step: f32| {
+        icon_button(
+            glyph,
+            15.0,
+            theme::MUTED,
+            Some(on_scroll(id, step)),
+            label,
+            theme::quiet,
+        )
+    };
     column![
-        container(heading(title)).padding(padding),
-        scrollable(container(row(items).spacing(14)).padding(padding))
+        container(
+            row![
+                heading_count(title, count),
+                spacer(),
+                arrow(Icon::ChevronLeft, "Scroll back", -SHELF_STEP),
+                arrow(Icon::ChevronRight, "Scroll on", SHELF_STEP),
+            ]
+            .spacing(S1)
+            .align_y(Center)
+        )
+        .padding(padding),
+        scrollable(container(row(items).spacing(S2)).padding(cards))
+            .id(id)
             .direction(Direction::Horizontal(Scrollbar::hidden()))
             .width(Fill),
     ]
-    .spacing(10)
+    .spacing(S1)
     .into()
 }
 
+/// Blättert ein Regal um `step` Pixel weiter.
+pub fn scroll_shelf<M: Send + 'static>(id: &'static str, step: f32) -> Task<M> {
+    iced::widget::operation::scroll_by(
+        id,
+        iced::widget::scrollable::AbsoluteOffset { x: step, y: 0.0 },
+    )
+}
+
+/// Schrittweite der Pfeile eines Regals.
+const SHELF_STEP: f32 = 640.0;
+
+/// Fläche für eine Gruppe zusammengehöriger Zeilen.
 pub fn card<'a, M: 'a>(content: impl Into<Element<'a, M>>) -> Element<'a, M> {
     container(content)
-        .padding(16)
+        .padding(S4)
         .width(Fill)
         .style(theme::surface)
         .into()
+}
+
+/// Zeilen mit Haarlinien dazwischen.
+pub fn divided<'a, M: 'a>(rows: Vec<Element<'a, M>>) -> Column<'a, M> {
+    let mut list = Column::new();
+    for (index, item) in rows.into_iter().enumerate() {
+        if index > 0 {
+            list = list.push(divider());
+        }
+        list = list.push(item);
+    }
+    list
+}
+
+pub fn divider<'a, M: 'a>() -> Element<'a, M> {
+    container(Space::new())
+        .width(Fill)
+        .height(1)
+        .style(theme::line)
+        .into()
+}
+
+/// Kennzahl mit Beschriftung darunter.
+pub fn stat<'a, M: 'a>(value: String, name: &'a str, color: Color) -> Element<'a, M> {
+    container(
+        column![
+            text(value)
+                .size(theme::T_SECTION)
+                .font(theme::DISPLAY)
+                .color(color),
+            label(name),
+        ]
+        .spacing(2),
+    )
+    .padding([S3, S4])
+    .width(Fill)
+    .style(theme::inset)
+    .into()
+}
+
+/// Waagerechter Balken: Anteil `fraction` in Farbe, der Rest als Spur.
+pub fn bar<'a, M: 'a>(fraction: f32, color: Color, height: f32) -> Element<'a, M> {
+    let filled = (fraction.clamp(0.0, 1.0) * 1000.0).round() as u16;
+    let mut parts = Row::new().height(height);
+    if filled > 0 {
+        parts = parts.push(
+            container(Space::new())
+                .width(FillPortion(filled))
+                .height(height)
+                .style(theme::solid(color, height / 2.0)),
+        );
+    }
+    if filled < 1000 {
+        parts = parts.push(Space::new().width(FillPortion(1000 - filled)));
+    }
+    container(parts)
+        .width(Fill)
+        .style(theme::solid(theme::alpha(theme::PAPER, 0.06), height / 2.0))
+        .into()
+}
+
+/// Leere Seite mit Icon, Aussage und nächstem Schritt.
+pub fn empty_state<'a, M: 'a>(glyph: Icon, title: &'a str, hint: &'a str) -> Element<'a, M> {
+    center(
+        column![
+            icon(glyph, 36.0, theme::FAINT),
+            text(title)
+                .size(theme::T_TITLE)
+                .font(theme::DISPLAY)
+                .color(theme::PAPER),
+            container(muted(hint)).max_width(420),
+        ]
+        .spacing(S2)
+        .align_x(Center),
+    )
+    .padding(S6)
+    .into()
 }
 
 /// Legt einen Dialog mittig über die Seite und sperrt alles dahinter.
@@ -300,29 +642,61 @@ pub fn modal<'a, M: 'a>(
 ) -> Element<'a, M> {
     let dialog = container(
         scrollable(
-            column![text(title).size(20), body]
-                .spacing(14)
-                .padding(iced::padding::right(12)),
+            column![
+                text(title).size(theme::T_SECTION).font(theme::DISPLAY),
+                body
+            ]
+            .spacing(S4)
+            .padding(iced::padding::right(S3)),
         )
-        .height(Length::Shrink),
+        .height(Length::Shrink)
+        .style(theme::scroll),
     )
     .width(width)
-    .max_height(760)
-    .padding(22)
-    .style(theme::surface);
-    stack![base, opaque(center(dialog).padding(24).style(theme::dim))].into()
+    .max_height(780)
+    .padding(S5)
+    .style(theme::dialog);
+    stack![base, opaque(center(dialog).padding(S5).style(theme::dim))].into()
 }
 
 pub fn spacer() -> Space {
     space().width(Fill)
 }
 
+/// Deckendes Kennzeichen, lesbar auf Bildern.
 pub fn badge_row<'a, M: 'a>(label: String, color: iced::Color) -> Element<'a, M> {
-    container(text(label).size(11))
+    container(text(label).size(theme::T_CAPTION).font(SEMIBOLD))
         .padding([2, 6])
         .style(theme::badge(color))
         .align_y(Center)
         .into()
+}
+
+/// Getöntes Kennzeichen im Fließtext.
+pub fn tag<'a, M: 'a>(label: impl text::IntoFragment<'a>, color: iced::Color) -> Element<'a, M> {
+    container(text(label).size(theme::T_CAPTION).font(SEMIBOLD))
+        .padding([2, 7])
+        .style(theme::tag(color))
+        .align_y(Center)
+        .into()
+}
+
+/// Kurze Meldung unten rechts.
+pub fn toast<'a, M: 'a>(message: &'a str, ok: bool) -> Element<'a, M> {
+    let (glyph, color) = if ok {
+        (Icon::CheckCircle, theme::TRACK)
+    } else {
+        (Icon::Question, theme::BAD)
+    };
+    container(
+        row![icon(glyph, 16.0, color), text(message).size(theme::T_SMALL)]
+            .spacing(S2)
+            .align_y(Center),
+    )
+    .padding([S3, S4])
+    .max_width(520)
+    .style(theme::toast(ok))
+    .into()
 }
 
 /// Führt ein Kernergebnis in eine Nachricht über.

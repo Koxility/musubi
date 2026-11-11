@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="8 34 112 60">
+  <!-- Das Zeichen ohne Feld, für die Seitenleiste. Die Fugen haben die Farbe der Leiste. -->
+  <g fill="none" stroke-width="12">
+    <path stroke="#5ec2c4" stroke-linecap="round" d="M112 42H75A22 22 0 1 0 75 86A22 22 0 1 0 75 42"/>
+    <path stroke="#131a2a" stroke-width="17" d="M54.15 42.03A22 22 0 0 1 71.45 52.02"/>
+    <path stroke="#e0563f" stroke-linecap="round" d="M16 86H53A22 22 0 1 0 53 42A22 22 0 1 0 53 86"/>
+    <path stroke="#131a2a" stroke-width="17" d="M73.85 85.97A22 22 0 0 1 56.55 75.98"/>
+    <path stroke="#5ec2c4" d="M75.0 86.0A22 22 0 0 1 55.95 75.0"/>
+  </g>
+</svg>

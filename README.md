@@ -90,7 +90,7 @@ AniList tokens are valid for one year. Musubi reminds you 14 days before yours e
 
 | Keys | Action |
 |---|---|
-| `Ctrl+1` … `Ctrl+6` | Switch page |
+| `Ctrl+1` … `Ctrl+7` | Switch page (Home, Library, AniList, Mapping, Sync, Settings, Profile) |
 | `Ctrl+R` | Refresh |
 | `Esc` | Close a dialog, the detail page or the player |
 | `Space` / `Ctrl+P` | Play / pause |

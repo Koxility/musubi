@@ -1,11 +1,11 @@
 //! Anmeldungen und Einstellungen.
 
-use iced::widget::{column, container, row, scrollable, slider, text, toggler};
+use iced::widget::{column, container, row, slider, svg, text};
 use iced::{Center, Element, Fill, Task};
 use musubi_core::Config;
 use musubi_core::oauth;
 
-use crate::app::{App, Message};
+use crate::app::{App, COMMIT, Message, VERSION};
 use crate::{setup, theme, ui};
 
 #[derive(Default)]
@@ -166,11 +166,61 @@ pub fn update(app: &mut App, msg: Msg) -> Task<Message> {
     Task::none()
 }
 
-fn status(label: &str, value: String) -> Element<'_, Msg> {
+/// Kopf eines Abschnitts: Name links, Verbindungsstand rechts in der Kordelfarbe.
+fn service_head<'a>(
+    name: &'a str,
+    connected: bool,
+    detail: String,
+    cord: iced::Color,
+) -> Element<'a, Msg> {
     row![
-        text(label).size(14).width(90).color(theme::MUTED),
-        text(value).size(14)
+        ui::heading(name),
+        ui::spacer(),
+        ui::muted(detail),
+        ui::tag(
+            if connected {
+                "Connected"
+            } else {
+                "Not connected"
+            },
+            if connected { cord } else { theme::MUTED }
+        ),
     ]
+    .spacing(theme::S3)
+    .align_y(Center)
+    .into()
+}
+
+/// Version und Git-Stand dieses Builds, damit Fehlerberichte eindeutig sind.
+fn half<'a>(field: Element<'a, Msg>) -> Element<'a, Msg> {
+    container(field).width(Fill).into()
+}
+
+fn about<'a>() -> Element<'a, Msg> {
+    static MARK: std::sync::LazyLock<svg::Handle> = std::sync::LazyLock::new(|| {
+        svg::Handle::from_memory(include_bytes!("../assets/mark.svg").as_slice())
+    });
+    let fact = |name: &'a str, value: &'a str| {
+        row![
+            ui::muted(name),
+            text(value).size(theme::T_SMALL).font(theme::SEMIBOLD),
+        ]
+        .spacing(6)
+        .align_y(Center)
+    };
+    row![
+        svg(MARK.clone()).width(45).height(24),
+        column![
+            text("Musubi").size(theme::T_BODY).font(theme::DISPLAY),
+            ui::muted("Watch on Jellyfin, track on AniList."),
+        ]
+        .spacing(1),
+        ui::spacer(),
+        fact("Version", VERSION),
+        fact("Commit", COMMIT),
+    ]
+    .spacing(theme::S4)
+    .align_y(Center)
     .into()
 }
 
@@ -178,32 +228,62 @@ pub fn view(app: &App) -> Element<'_, Message> {
     let s = &app.settings;
     let edit = |wrap: fn(String) -> Edit| move |v: String| Msg::Edit(wrap(v));
     let jellyfin = column![
-        ui::heading("Jellyfin"),
-        status("Status", setup::jellyfin_status(&app.auth)),
-        ui::field("Server URL", &s.url, edit(Edit::Url)),
-        ui::field("Username", &s.user, edit(Edit::User)),
-        ui::secret_field(
-            "Password (never stored)",
-            &s.password,
-            edit(Edit::Password),
-            Some(Msg::LoginJellyfin)
+        service_head(
+            "Jellyfin",
+            app.auth.jellyfin_user.is_some(),
+            setup::jellyfin_status(&app.auth),
+            theme::WATCH
         ),
-        ui::secret_field("or API key", &s.api_key, edit(Edit::ApiKey), None),
+        ui::field("Server URL", &s.url, edit(Edit::Url)),
         row![
-            ui::primary("Log in", Msg::LoginJellyfin),
-            ui::secondary("Log out", Msg::LogoutJellyfin),
+            half(ui::field("Username", &s.user, edit(Edit::User))),
+            half(ui::secret_field(
+                "Password (never stored)",
+                &s.password,
+                edit(Edit::Password),
+                Some(Msg::LoginJellyfin)
+            )),
         ]
-        .spacing(8),
-    ]
-    .spacing(12);
-    let anilist = column![
-        ui::heading("AniList"),
-        status("Status", setup::anilist_status(&app.auth)),
-        ui::muted("Create an app at anilist.co/settings/developer and enter its client ID."),
-        ui::field("Client ID", &s.client_id, edit(Edit::ClientId)),
-        ui::muted(format!("Redirect URL: {}", s.redirect)),
+        .spacing(theme::S3),
         ui::secret_field(
-            "Token or redirect URL (PIN flow)",
+            "Or an API key instead of the password",
+            &s.api_key,
+            edit(Edit::ApiKey),
+            None
+        ),
+        row![
+            ui::watch("Log in to Jellyfin", Msg::LoginJellyfin),
+            ui::quiet("Log out", Msg::LogoutJellyfin),
+        ]
+        .spacing(theme::S2)
+        .align_y(Center),
+    ]
+    .spacing(theme::S3);
+    let anilist = column![
+        service_head(
+            "AniList",
+            app.auth.anilist_logged_in,
+            setup::anilist_status(&app.auth),
+            theme::TRACK
+        ),
+        ui::muted("Create an app at anilist.co/settings/developer and enter its client ID."),
+        row![
+            half(ui::field("Client ID", &s.client_id, edit(Edit::ClientId))),
+            half(
+                column![
+                    ui::label("Redirect URL for that app"),
+                    container(text(&s.redirect).size(theme::T_SMALL).color(theme::MUTED))
+                        .padding([9, 10])
+                        .width(Fill)
+                        .style(theme::inset),
+                ]
+                .spacing(6)
+                .into()
+            ),
+        ]
+        .spacing(theme::S3),
+        ui::secret_field(
+            "Token or redirect URL, if you log in without the browser flow",
             &s.token,
             edit(Edit::Token),
             None
@@ -211,46 +291,59 @@ pub fn view(app: &App) -> Element<'_, Message> {
         row![
             ui::primary("Log in with browser", Msg::LoginAniListBrowser),
             ui::secondary("Use pasted token", Msg::LoginAniListToken),
-            ui::secondary("Log out", Msg::LogoutAniList),
+            ui::quiet("Log out", Msg::LogoutAniList),
         ]
-        .spacing(8),
+        .spacing(theme::S2)
+        .align_y(Center),
     ]
-    .spacing(12);
+    .spacing(theme::S3);
     let preferences = column![
         ui::heading("Sync and player"),
-        toggler(s.auto_sync)
-            .label("Update AniList automatically while watching")
-            .text_size(14)
-            .on_toggle(|v| Msg::Edit(Edit::AutoSync(v))),
+        ui::toggle(
+            "Update AniList automatically while watching",
+            s.auto_sync,
+            |v| Msg::Edit(Edit::AutoSync(v))
+        ),
+        ui::toggle("Play the next episode automatically", s.autoplay, |v| {
+            Msg::Edit(Edit::Autoplay(v))
+        }),
         column![
-            ui::muted(format!("Count as watched at {:.0}%", s.threshold)),
-            slider(50.0..=100.0, s.threshold, |v| Msg::Edit(Edit::Threshold(v))).step(1.0),
+            row![
+                text("Count an episode as watched at").size(theme::T_BODY),
+                text(format!("{:.0}%", s.threshold))
+                    .size(theme::T_BODY)
+                    .font(theme::SEMIBOLD)
+                    .color(theme::TRACK),
+            ]
+            .spacing(6),
+            slider(50.0..=100.0, s.threshold, |v| Msg::Edit(Edit::Threshold(v)))
+                .step(1.0)
+                .style(theme::form_slider),
         ]
-        .spacing(4),
-        toggler(s.autoplay)
-            .label("Play next episode automatically")
-            .text_size(14)
-            .on_toggle(|v| Msg::Edit(Edit::Autoplay(v))),
-        ui::primary("Save settings", Msg::Save),
+        .spacing(theme::S2),
+        row![ui::primary("Save settings", Msg::Save)],
     ]
-    .spacing(12);
+    .spacing(theme::S4);
     let body = column![
-        row![
-            ui::heading("Settings"),
-            ui::spacer(),
-            ui::secondary("Run setup", Msg::RunSetup),
-        ]
-        .align_y(Center),
+        ui::page_header(
+            "Settings",
+            None,
+            vec![ui::secondary("Run setup again", Msg::RunSetup)]
+        ),
         ui::card(jellyfin),
         ui::card(anilist),
         ui::card(preferences),
+        ui::divider(),
+        about(),
     ]
-    .spacing(18)
-    .max_width(760)
-    .padding(iced::padding::right(14));
-    let page: Element<'_, Msg> = container(scrollable(body).width(Fill).height(Fill))
-        .padding(24)
-        .center_x(Fill)
-        .into();
+    .spacing(theme::S4)
+    .max_width(820)
+    .padding(iced::Padding {
+        top: theme::S5,
+        right: ui::PAGE_PADDING,
+        bottom: theme::S6,
+        left: ui::PAGE_PADDING,
+    });
+    let page: Element<'_, Msg> = ui::scroll(body);
     page.map(Message::Settings)
 }

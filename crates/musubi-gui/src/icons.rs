@@ -24,9 +24,28 @@ pub enum Icon {
     Check,
     CheckCircle,
     Star,
+    Home,
+    Library,
+    List,
+    Profile,
+    Knot,
+    Link,
+    Sync,
+    Settings,
+    Search,
+    Plus,
+    Edit,
+    Calendar,
+    Clock,
+    ChevronLeft,
+    ChevronRight,
+    Close,
+    External,
+    Trash,
+    Question,
 }
 
-const ALL: [Icon; 18] = [
+const ALL: [Icon; 37] = [
     Icon::Play,
     Icon::Pause,
     Icon::SkipPrevious,
@@ -45,6 +64,25 @@ const ALL: [Icon; 18] = [
     Icon::Check,
     Icon::CheckCircle,
     Icon::Star,
+    Icon::Home,
+    Icon::Library,
+    Icon::List,
+    Icon::Profile,
+    Icon::Knot,
+    Icon::Link,
+    Icon::Sync,
+    Icon::Settings,
+    Icon::Search,
+    Icon::Plus,
+    Icon::Edit,
+    Icon::Calendar,
+    Icon::Clock,
+    Icon::ChevronLeft,
+    Icon::ChevronRight,
+    Icon::Close,
+    Icon::External,
+    Icon::Trash,
+    Icon::Question,
 ];
 
 /// Gefüllte Formen.
@@ -119,6 +157,63 @@ impl Icon {
             ),
             Self::Star => fill(
                 "M12 3.3l2.7 5.5 6 .9-4.35 4.25 1.03 6L12 17.1l-5.38 2.85 1.03-6L3.3 9.7l6-.9z",
+            ),
+            Self::Home => {
+                stroke("M4 11l8-7 8 7M6 9.5V19a1 1 0 0 0 1 1h3.5v-5.5h3V20H17a1 1 0 0 0 1-1V9.5")
+            }
+            Self::Library => format!(
+                r#"<rect {STROKE} x="3.5" y="4" width="7" height="9.5" rx="1.5"/><rect {STROKE} x="13.5" y="4" width="7" height="5.5" rx="1.5"/><rect {STROKE} x="13.5" y="12.5" width="7" height="7.5" rx="1.5"/><rect {STROKE} x="3.5" y="16.5" width="7" height="3.5" rx="1.5"/>"#
+            ),
+            Self::List => {
+                stroke("M8.5 6.5h11M8.5 12h11M8.5 17.5h11M4.5 6.5h.01M4.5 12h.01M4.5 17.5h.01")
+            }
+            Self::Profile => format!(
+                r#"<circle {STROKE} cx="12" cy="8.5" r="3.7"/>{}"#,
+                stroke("M4.8 19.6a7.3 7.3 0 0 1 14.4 0")
+            ),
+            // Zwei Kordeln, die ineinandergreifen: das Zeichen der App.
+            Self::Knot => format!(
+                r#"<circle {STROKE} cx="9.5" cy="11" r="5"/><circle {STROKE} cx="14.5" cy="13" r="5"/>{}"#,
+                stroke("M4.5 11v9.5M19.5 13V3.5")
+            ),
+            Self::Link => stroke(
+                "M10 14a4.2 4.2 0 0 0 6 0l3-3a4.2 4.2 0 0 0-6-6l-1.2 1.2M14 10a4.2 4.2 0 0 0-6 0l-3 3a4.2 4.2 0 0 0 6 6l1.2-1.2",
+            ),
+            Self::Sync => stroke(
+                "M4.5 12a7.5 7.5 0 0 1 12.9-5.2L19.5 9M19.5 4.5V9H15M19.5 12a7.5 7.5 0 0 1-12.9 5.2L4.5 15M4.5 19.5V15H9",
+            ),
+            Self::Settings => format!(
+                r#"<circle {STROKE} cx="15" cy="7" r="2"/><circle {STROKE} cx="9" cy="17" r="2"/>{}"#,
+                stroke("M4 7h9M17 7h3M4 17h3M11 17h9")
+            ),
+            Self::Search => format!(
+                r#"<circle {STROKE} cx="11" cy="11" r="6.2"/>{}"#,
+                stroke("M20 20l-4.4-4.4")
+            ),
+            Self::Plus => stroke("M12 5v14M5 12h14"),
+            Self::Edit => stroke(
+                "M4.5 19.5l.9-4.1L16.2 4.6a1.6 1.6 0 0 1 2.3 0l.9.9a1.6 1.6 0 0 1 0 2.3L8.6 18.6zM14.5 6.3l3.2 3.2",
+            ),
+            Self::Calendar => format!(
+                r#"<rect {STROKE} x="4" y="5.5" width="16" height="14.5" rx="2.2"/>{}"#,
+                stroke("M4 10h16M8.5 3.5v4M15.5 3.5v4")
+            ),
+            Self::Clock => format!(
+                r#"<circle {STROKE} cx="12" cy="12" r="8.5"/>{}"#,
+                stroke("M12 7.5V12l3 2")
+            ),
+            Self::ChevronLeft => stroke("M14.5 5.5L8 12l6.5 6.5"),
+            Self::ChevronRight => stroke("M9.5 5.5L16 12l-6.5 6.5"),
+            Self::Close => stroke("M6 6l12 12M18 6L6 18"),
+            Self::External => stroke(
+                "M13.5 4.5h6v6M19.5 4.5L11 13M17.5 14v4a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 18V8A1.5 1.5 0 0 1 6 6.5h4",
+            ),
+            Self::Trash => stroke(
+                "M5 7h14M9.5 7V5a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v2M7 7l.8 11.6a1.5 1.5 0 0 0 1.5 1.4h5.4a1.5 1.5 0 0 0 1.5-1.4L17 7",
+            ),
+            Self::Question => format!(
+                r#"<circle {STROKE} cx="12" cy="12" r="9"/>{}"#,
+                stroke("M9.6 9.4a2.5 2.5 0 1 1 3.6 2.3c-.8.5-1.2 1-1.2 1.9M12 16.6h.01")
             ),
         }
     }

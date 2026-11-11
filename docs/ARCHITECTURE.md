@@ -33,6 +33,8 @@ Dependencies only point downwards, and the crate boundaries let the compiler enf
 The GUI is pure Rust without system toolkits like GTK and looks the same on every desktop.
 
 - Each page owns its state, messages and view, and `app.rs` wires them to the core.
+- The design system lives in `theme/`: `tokens.rs` names every colour, spacing step, radius and font size, `fonts.rs` embeds Sora (titles) and Hanken Grotesk (text), and `styles.rs` builds all widget styles from those tokens. Pages use the tokens and the components in `ui.rs` instead of literals.
+- Two accent colours carry meaning. Red (`WATCH`) marks watching in Jellyfin: play, resume, playback progress. Teal (`TRACK`) marks tracking on AniList: status, list progress, sync. The knot mark shows where a title is connected to both.
 - Icons are hand-made SVGs in `icons.rs`, rendered by resvg. A test parses every icon with usvg so a broken one cannot silently disappear.
 - Posters load only when they scroll into view. The cache files are named `*.img`, so the GUI reads them as bytes; when given a path, Iced picks the decoder by file extension.
 - Iced has no virtualized grids, so the library builds widgets for every title.
@@ -57,7 +59,7 @@ About a dozen operations do not justify a code generation step with a checked-in
 
 ### Build info
 
-`crates/musubi-gui/build.rs` embeds the short git commit. The sidebar shows it next to the version, which makes it obvious whether a launcher starts an outdated binary.
+`crates/musubi-gui/build.rs` embeds the short git commit. The sidebar and the bottom of the Settings page show it next to the version, which makes it obvious whether a launcher starts an outdated binary.
 
 ## Flows
 

@@ -3,20 +3,22 @@
 use std::fmt;
 
 use iced::widget::{
-    button, center, column, container, hover, pick_list, row, scrollable, stack, text, text_input,
-    toggler,
+    button, center, column, container, hover, pick_list, responsive, row, text, text_input,
 };
-use iced::{Bottom, Center, Element, Fill, Task};
+use iced::{Center, Element, Fill, Task};
 use musubi_core::domain::{
     EntryPatch, FuzzyDate, LibraryItem, ListEntry, ListStatus, Media, MediaKind, ScoreFormat,
     Viewer, airing_entries, in_progress_entries,
 };
 
 use crate::app::{App, Message};
+use crate::icons::Icon;
 use crate::images::ImageKey;
 use crate::{theme, ui};
 
-const COVER: (f32, f32) = (130.0, 186.0);
+const COVER: (f32, f32) = (124.0, 176.0);
+/// Rand der Karten, damit die Fläche beim Überfahren um das Cover herum sichtbar wird.
+const CARD_PADDING: f32 = 6.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Tab {
@@ -557,12 +559,22 @@ pub fn update(app: &mut App, msg: Msg) -> Task<Message> {
     Task::none()
 }
 
+/// Zeigt die Liste dieser Art, gefiltert auf einen Status, z. B. aus dem Profil heraus.
+pub fn show_status(app: &mut App, kind: MediaKind, status: ListStatus) {
+    app.anilist.tab = match kind {
+        MediaKind::Anime => Tab::Anime,
+        MediaKind::Manga => Tab::Manga,
+    };
+    app.anilist.status = Some(status);
+    app.anilist.search.clear();
+}
+
 fn want(key: ImageKey) -> Msg {
     Msg::WantImage(key)
 }
 
-fn cover<'a>(app: &'a App, entry: &ListEntry, width: f32, height: f32) -> Element<'a, Msg> {
-    let key = entry.media.cover_url.clone().map(ImageKey::Cover);
+fn cover<'a>(app: &'a App, media: &Media, width: f32, height: f32) -> Element<'a, Msg> {
+    let key = media.cover_url.clone().map(ImageKey::Cover);
     ui::picture(&app.images, key, width, height, want)
 }
 
@@ -573,54 +585,70 @@ fn total(entry: &ListEntry) -> String {
         .map_or("?".to_owned(), |t| t.to_string())
 }
 
-/// Karte im Stil der AniList-Startseite, mit `+` beim Überfahren.
-fn progress_card<'a>(app: &'a App, entry: &ListEntry) -> Element<'a, Msg> {
-    let strip: Element<'a, Msg> = match entry.media.next_airing {
-        Some(next) => container(
-            column![
-                text(format!("Ep {}", next.episode)).size(12),
-                text(ui::countdown(next.airing_at - app.now))
-                    .size(12)
-                    .color(theme::ACCENT),
-            ]
-            .align_x(Center),
-        )
-        .width(COVER.0)
-        .padding(4)
-        .style(theme::dim)
-        .align_x(Center)
-        .into(),
-        None => iced::widget::Space::new().into(),
+/// Anteil des Fortschritts, falls die Gesamtzahl bekannt ist.
+fn fraction(entry: &ListEntry) -> Option<f32> {
+    let total = entry.media.total_units().filter(|t| *t > 0)?;
+    Some((entry.progress as f32 / total as f32).min(1.0))
+}
+
+/// Ob ein weiterer Zähler noch in die Gesamtzahl passt.
+fn can_increment(entry: &ListEntry) -> bool {
+    entry.media.total_units().is_none_or(|t| entry.progress < t)
+}
+
+/// Runder Knopf, der den Fortschritt um eins erhöht.
+fn plus_one<'a>(entry: &ListEntry, size: f32) -> Element<'a, Msg> {
+    let label = if entry.media.kind == MediaKind::Anime {
+        "Watched one more episode"
+    } else {
+        "Read one more chapter"
     };
-    let image = stack![
-        cover(app, entry, COVER.0, COVER.1),
-        container(strip).height(COVER.1).align_y(Bottom),
-    ];
+    ui::icon_button(
+        Icon::Plus,
+        size,
+        theme::TRACK,
+        can_increment(entry).then(|| Msg::Increment(entry.clone())),
+        label,
+        theme::ghost_button,
+    )
+}
+
+/// Karte im Stil der AniList-Startseite, mit `+1` beim Überfahren.
+fn progress_card<'a>(app: &'a App, entry: &ListEntry) -> Element<'a, Msg> {
+    let image = ui::with_progress(
+        cover(app, &entry.media, COVER.0, COVER.1),
+        fraction(entry),
+        COVER,
+        theme::TRACK,
+    );
     let behind = entry.episodes_behind();
-    let mut info = row![text(format!("{}/{}", entry.progress, total(entry))).size(13)].spacing(6);
+    let mut info = row![ui::muted(format!("{} / {}", entry.progress, total(entry)))]
+        .spacing(6)
+        .align_y(Center);
     if behind > 0 {
-        info = info.push(ui::badge_row(format!("{behind} behind"), theme::ORANGE));
+        info = info.push(ui::tag(format!("{behind} behind"), theme::WARN));
     }
     let base = button(
         column![
             image,
-            text(ui::ellipsize(entry.media.title.preferred(), 18)).size(13),
-            info,
+            column![
+                text(ui::ellipsize(entry.media.title.preferred(), 17))
+                    .size(theme::T_SMALL)
+                    .font(theme::MEDIUM),
+                info,
+            ]
+            .spacing(2),
         ]
-        .spacing(5),
+        .spacing(theme::S2),
     )
-    .padding(4)
+    .padding(CARD_PADDING)
     .style(theme::card_button)
     .on_press(Msg::OpenEditor(entry.clone()));
-    let plus = container(
-        button(text("+").size(18))
-            .padding([2, 12])
-            .style(theme::primary)
-            .on_press(Msg::Increment(entry.clone())),
-    )
-    .padding(10)
-    .width(COVER.0 + 8.0)
-    .align_right(COVER.0 + 8.0);
+    let side = COVER.0 + 2.0 * CARD_PADDING;
+    let plus = container(plus_one(entry, 15.0))
+        .padding(CARD_PADDING + 6.0)
+        .width(side)
+        .align_right(side);
     hover(base, plus)
 }
 
@@ -632,39 +660,210 @@ fn card_section<'a>(
     if entries.is_empty() {
         return None;
     }
+    let count = entries.len();
     let cards = entries.iter().map(|e| progress_card(app, e));
-    Some(
-        column![
-            ui::heading(title),
-            row(cards).spacing(12).wrap().vertical_spacing(14)
+    Some(ui::section(
+        ui::heading_count(title, count),
+        // Die Karten haben einen eigenen Rand und rücken deshalb unter die Überschrift ein.
+        container(
+            row(cards)
+                .spacing(theme::S1)
+                .wrap()
+                .vertical_spacing(theme::S2),
+        )
+        .padding(iced::padding::left(-CARD_PADDING)),
+    ))
+}
+
+/// Zeile des Sendeplans: nächste Folge, Countdown und eigener Stand.
+fn airing_row<'a>(app: &'a App, entry: &'a ListEntry) -> Element<'a, Msg> {
+    let next = entry.media.next_airing;
+    let when = next.map_or(String::new(), |n| ui::countdown(n.airing_at - app.now));
+    let episode = next.map_or(String::new(), |n| format!("Episode {}", n.episode));
+    let behind = entry.episodes_behind();
+    let mut state = row![ui::muted(format!("{} / {}", entry.progress, total(entry)))]
+        .spacing(6)
+        .align_y(Center);
+    if behind > 0 {
+        state = state.push(ui::tag(format!("{behind} behind"), theme::WARN));
+    }
+    let info = button(
+        row![
+            cover(app, &entry.media, 40.0, 56.0),
+            column![
+                text(ui::ellipsize(entry.media.title.preferred(), 30))
+                    .size(theme::T_SMALL)
+                    .font(theme::MEDIUM),
+                state,
+            ]
+            .spacing(3)
+            .width(Fill),
+            column![
+                text(when)
+                    .size(theme::T_SMALL)
+                    .font(theme::SEMIBOLD)
+                    .color(theme::TRACK),
+                ui::muted(episode),
+            ]
+            .spacing(3)
+            .align_x(iced::Alignment::End),
         ]
-        .spacing(12)
-        .into(),
+        .spacing(theme::S3)
+        .align_y(Center),
     )
+    .width(Fill)
+    .padding([6.0, theme::S2])
+    .style(theme::row_button)
+    .on_press(Msg::OpenEditor(entry.clone()));
+    row![info, plus_one(entry, 14.0)]
+        .spacing(theme::S2)
+        .align_y(Center)
+        .into()
+}
+
+/// Sendeplan der laufenden Titel, die nächste Folge zuerst.
+fn schedule<'a>(app: &'a App, entries: Vec<&'a ListEntry>) -> Element<'a, Msg> {
+    let count = entries.len();
+    let rows: Vec<Element<'a, Msg>> = entries.into_iter().map(|e| airing_row(app, e)).collect();
+    let body: Element<'a, Msg> = if rows.is_empty() {
+        container(ui::muted(
+            "Nothing you watch is airing right now. Titles appear here once a next episode is scheduled.",
+        ))
+        .padding(theme::S2)
+        .into()
+    } else {
+        ui::divided(rows).into()
+    };
+    ui::section(
+        ui::heading_count("Airing", count),
+        container(body)
+            .padding(theme::S2)
+            .width(Fill)
+            .style(theme::surface),
+    )
+}
+
+/// Kennzahlen über der Übersicht.
+fn overview_numbers(app: &App) -> Element<'_, Msg> {
+    let state = &app.anilist;
+    let watching = state
+        .anime
+        .iter()
+        .filter(|e| matches!(e.status, ListStatus::Current | ListStatus::Repeating))
+        .count();
+    let reading = state
+        .manga
+        .iter()
+        .filter(|e| matches!(e.status, ListStatus::Current | ListStatus::Repeating))
+        .count();
+    let airing = airing_entries(&state.anime).len();
+    let behind: u32 = state.anime.iter().map(ListEntry::episodes_behind).sum();
+    row![
+        ui::stat(watching.to_string(), "Watching", theme::PAPER),
+        ui::stat(airing.to_string(), "Airing now", theme::TRACK),
+        ui::stat(
+            behind.to_string(),
+            "Episodes behind",
+            if behind > 0 {
+                theme::WARN
+            } else {
+                theme::PAPER
+            }
+        ),
+        ui::stat(reading.to_string(), "Reading", theme::PAPER),
+    ]
+    .spacing(theme::S3)
+    .into()
+}
+
+fn progress_sections(app: &App) -> Element<'_, Msg> {
+    let state = &app.anilist;
+    let sections = [
+        card_section(app, "Anime in progress", in_progress_entries(&state.anime)),
+        card_section(app, "Manga in progress", in_progress_entries(&state.manga)),
+    ];
+    let mut content = column![].spacing(theme::S5);
+    let mut any = false;
+    for section in sections.into_iter().flatten() {
+        any = true;
+        content = content.push(section);
+    }
+    if !any {
+        content = content.push(ui::muted(
+            "Nothing else in progress. Set a title to Watching or Reading to see it here.",
+        ));
+    }
+    content.into()
 }
 
 fn overview(app: &App) -> Element<'_, Msg> {
     let state = &app.anilist;
-    let mut content = column![].spacing(30).padding(iced::padding::right(14));
-    let sections = [
-        card_section(app, "Airing", airing_entries(&state.anime)),
-        card_section(app, "Anime in Progress", in_progress_entries(&state.anime)),
-        card_section(app, "Manga in Progress", in_progress_entries(&state.manga)),
-    ];
-    let mut empty = true;
-    for section in sections.into_iter().flatten() {
-        empty = false;
-        content = content.push(section);
-    }
-    if empty {
-        return center(ui::muted(if state.loading {
-            "Loading your lists…"
+    if state.anime.is_empty() && state.manga.is_empty() {
+        return if state.loading {
+            center(ui::muted("Loading your lists…")).into()
         } else {
-            "Nothing in progress. Add something to watch."
-        }))
-        .into();
+            ui::empty_state(
+                Icon::List,
+                "Your lists are empty",
+                "Add a title to start tracking what you watch and read.",
+            )
+        };
     }
-    scrollable(content).width(Fill).height(Fill).into()
+    responsive(move |size| {
+        let airing = schedule(app, airing_entries(&app.anilist.anime));
+        // Breit stehen Sendeplan und Karten nebeneinander, schmal untereinander.
+        let body: Element<'_, Msg> = if size.width >= 900.0 {
+            row![
+                container(airing).width(400),
+                container(progress_sections(app)).width(Fill),
+            ]
+            .spacing(theme::S6)
+            .into()
+        } else {
+            column![airing, progress_sections(app)]
+                .spacing(theme::S5)
+                .into()
+        };
+        ui::scroll(
+            column![overview_numbers(app), body]
+                .spacing(theme::S5)
+                .padding(iced::Padding {
+                    top: 0.0,
+                    right: 0.0,
+                    bottom: theme::S6,
+                    left: 0.0,
+                }),
+        )
+    })
+    .into()
+}
+
+/// Spaltenbreiten der Listen, für Kopf und Zeilen gleich.
+const SCORE_WIDTH: f32 = 64.0;
+const PROGRESS_WIDTH: f32 = 150.0;
+const FORMAT_WIDTH: f32 = 72.0;
+
+fn list_head<'a>(kind: MediaKind) -> Element<'a, Msg> {
+    let cell = |label: &'a str| text(label).size(theme::T_CAPTION).color(theme::FAINT);
+    row![
+        cell("Title").width(Fill),
+        cell("Score").width(SCORE_WIDTH),
+        cell(if kind == MediaKind::Anime {
+            "Episodes"
+        } else {
+            "Chapters"
+        })
+        .width(PROGRESS_WIDTH),
+        cell("Format").width(FORMAT_WIDTH),
+    ]
+    .spacing(theme::S3)
+    .padding(iced::Padding {
+        top: 0.0,
+        right: theme::S2,
+        bottom: 6.0,
+        left: theme::S2 + 40.0 + theme::S3,
+    })
+    .into()
 }
 
 fn list_row<'a>(app: &'a App, entry: &ListEntry, format: ScoreFormat) -> Element<'a, Msg> {
@@ -673,58 +872,118 @@ fn list_row<'a>(app: &'a App, entry: &ListEntry, format: ScoreFormat) -> Element
     } else {
         format.display(entry.score_raw)
     };
-    let mut progress = row![text(format!("{}/{}", entry.progress, total(entry))).size(14)]
-        .spacing(8)
-        .align_y(Center);
-    if matches!(entry.status, ListStatus::Current | ListStatus::Repeating) {
-        progress = progress.push(
-            button(text("+").size(13))
-                .padding([1, 8])
-                .style(theme::secondary)
-                .on_press(Msg::Increment(entry.clone())),
-        );
+    let mut title = row![
+        text(ui::ellipsize(entry.media.title.preferred(), 64))
+            .size(theme::T_BODY)
+            .font(theme::MEDIUM)
+    ]
+    .spacing(theme::S2)
+    .align_y(Center);
+    if entry.episodes_behind() > 0 {
+        title = title.push(ui::tag(
+            format!("{} behind", entry.episodes_behind()),
+            theme::WARN,
+        ));
     }
-    button(
+    if entry.private {
+        title = title.push(ui::tag("Private", theme::MUTED));
+    }
+    if !entry.notes.is_empty() {
+        title = title.push(ui::muted(ui::ellipsize(&entry.notes, 40)));
+    }
+    let amount = column![
+        text(format!("{} / {}", entry.progress, total(entry))).size(theme::T_SMALL),
+        ui::bar(
+            fraction(entry).unwrap_or(0.0),
+            theme::status_color(entry.status),
+            3.0
+        ),
+    ]
+    .spacing(5)
+    .width(Fill);
+    let active = matches!(entry.status, ListStatus::Current | ListStatus::Repeating);
+    let info = button(
         row![
-            cover(app, entry, 46.0, 66.0),
-            text(ui::ellipsize(entry.media.title.preferred(), 70))
-                .size(15)
-                .width(Fill),
-            text(score).size(14).width(70),
-            container(progress).width(120),
-            text(entry.media.format.clone().unwrap_or_default())
-                .size(13)
-                .color(theme::MUTED)
-                .width(70),
+            cover(app, &entry.media, 40.0, 56.0),
+            container(title).width(Fill),
+            text(score).size(theme::T_SMALL).width(SCORE_WIDTH),
+            container(amount).width(PROGRESS_WIDTH - 44.0),
         ]
-        .spacing(14)
+        .spacing(theme::S3)
         .align_y(Center),
     )
     .width(Fill)
-    .padding(6)
-    .style(theme::card_button)
-    .on_press(Msg::OpenEditor(entry.clone()))
+    .padding([6.0, theme::S2])
+    .style(theme::row_button)
+    .on_press(Msg::OpenEditor(entry.clone()));
+    let plus: Element<'a, Msg> = if active {
+        plus_one(entry, 13.0)
+    } else {
+        iced::widget::Space::new().width(23.4).into()
+    };
+    row![
+        info,
+        container(plus).width(32),
+        text(entry.media.format.clone().unwrap_or_default())
+            .size(theme::T_LABEL)
+            .color(theme::MUTED)
+            .width(FORMAT_WIDTH),
+    ]
+    .spacing(theme::S3)
+    .padding(iced::padding::right(theme::S2))
+    .align_y(Center)
     .into()
 }
 
-fn status_filter<'a>(state: &State, kind: MediaKind) -> Element<'a, Msg> {
-    let tab = |label: String, value: Option<ListStatus>, active: bool| -> Element<'a, Msg> {
-        button(text(label).size(14))
-            .width(Fill)
-            .padding([7, 12])
-            .style(theme::nav_button(active))
-            .on_press(Msg::StatusFilter(value))
-            .into()
-    };
-    let mut tabs = vec![tab("All".to_owned(), None, state.status.is_none())];
-    tabs.extend(ListStatus::ALL.iter().map(|status| {
-        tab(
-            status.label(kind).to_owned(),
-            Some(*status),
-            state.status == Some(*status),
+/// Seitenleiste der Listen: Suche und Status mit Anzahl.
+fn status_filter<'a>(state: &'a State, kind: MediaKind) -> Element<'a, Msg> {
+    let entries = state.list(kind);
+    let item = |label: &'a str, value: Option<ListStatus>, count: usize| -> Element<'a, Msg> {
+        let active = state.status == value;
+        let dot = value.map_or(theme::FAINT, theme::status_color);
+        button(
+            row![
+                container(iced::widget::Space::new())
+                    .width(8)
+                    .height(8)
+                    .style(theme::solid(dot, 4.0)),
+                text(label)
+                    .size(theme::T_SMALL)
+                    .font(if active {
+                        theme::SEMIBOLD
+                    } else {
+                        theme::MEDIUM
+                    })
+                    .width(Fill),
+                text(count.to_string())
+                    .size(theme::T_LABEL)
+                    .color(theme::FAINT),
+            ]
+            .spacing(theme::S2)
+            .align_y(Center),
         )
+        .width(Fill)
+        .padding([7.0, theme::S3])
+        .style(theme::nav_button(active, theme::TRACK))
+        .on_press(Msg::StatusFilter(value))
+        .into()
+    };
+    let mut items = vec![item("All", None, entries.len())];
+    items.extend(ListStatus::ALL.iter().map(|status| {
+        let count = entries.iter().filter(|e| e.status == *status).count();
+        item(status.label(kind), Some(*status), count)
     }));
-    container(column(tabs).spacing(3)).width(170).into()
+    column![
+        text_input("Filter this list", &state.search)
+            .on_input(Msg::Search)
+            .size(theme::T_SMALL)
+            .padding([8, 10])
+            .style(theme::input),
+        column(items).spacing(2),
+    ]
+    .spacing(theme::S3)
+    .width(200)
+    .into()
 }
 
 fn list_view(app: &App) -> Element<'_, Msg> {
@@ -745,7 +1004,13 @@ fn list_view(app: &App) -> Element<'_, Msg> {
                     .all()
                     .any(|t| t.to_lowercase().contains(&needle)))
     };
-    let mut body = column![].spacing(20).padding(iced::padding::right(14));
+    let mut body = column![].spacing(theme::S5).padding(iced::Padding {
+        top: 0.0,
+        right: 0.0,
+        bottom: theme::S6,
+        left: 0.0,
+    });
+    let mut any = false;
     for status in ListStatus::ALL {
         let entries: Vec<&ListEntry> = state
             .list(kind)
@@ -756,261 +1021,433 @@ fn list_view(app: &App) -> Element<'_, Msg> {
         if entries.is_empty() {
             continue;
         }
-        let rows = entries.iter().map(|e| list_row(app, e, format));
-        body = body.push(
-            column![
-                ui::heading(status.label(kind)),
-                ui::card(column(rows).spacing(2)),
-            ]
-            .spacing(8),
-        );
-    }
-    row![
-        column![
-            text_input("Filter", &state.search)
-                .on_input(Msg::Search)
-                .padding(8)
-                .style(theme::input),
-            status_filter(state, kind),
+        any = true;
+        let count = entries.len();
+        let rows: Vec<Element<'_, Msg>> =
+            entries.iter().map(|e| list_row(app, e, format)).collect();
+        let heading = row![
+            container(iced::widget::Space::new())
+                .width(4)
+                .height(18)
+                .style(theme::solid(theme::status_color(status), 2.0)),
+            ui::heading_count(status.label(kind), count),
         ]
-        .spacing(12)
-        .width(170),
-        scrollable(body).width(Fill).height(Fill),
-    ]
-    .spacing(20)
-    .into()
+        .spacing(theme::S2)
+        .align_y(Center);
+        body = body.push(ui::section(
+            heading.into(),
+            container(column![list_head(kind), ui::divided(rows)])
+                .padding(iced::Padding {
+                    top: theme::S3,
+                    right: theme::S1,
+                    bottom: theme::S1,
+                    left: theme::S1,
+                })
+                .width(Fill)
+                .style(theme::surface),
+        ));
+    }
+    let list: Element<'_, Msg> = if any {
+        ui::scroll(body)
+    } else if state.list(kind).is_empty() {
+        ui::empty_state(
+            Icon::List,
+            "This list is empty",
+            "Add a title to start tracking it here.",
+        )
+    } else {
+        ui::empty_state(
+            Icon::Search,
+            "No entries match",
+            "Clear the filter or pick another status.",
+        )
+    };
+    row![status_filter(state, kind), list]
+        .spacing(theme::S5)
+        .into()
 }
 
-fn tabs(state: &State) -> Element<'_, Msg> {
-    let tab = |label: &'static str, value: Tab| {
-        button(text(label).size(15))
-            .padding([8, 16])
-            .style(theme::nav_button(state.tab == value))
-            .on_press(Msg::Tab(value))
-    };
-    row![
-        tab("Overview", Tab::Overview),
-        tab("Anime List", Tab::Anime),
-        tab("Manga List", Tab::Manga),
-        ui::spacer(),
-        ui::secondary("Custom lists", Msg::OpenLists),
-        ui::primary("Add title", Msg::OpenAdd),
+fn header(state: &State) -> Element<'_, Msg> {
+    let tab = |label: &str, value: Tab| (label.to_owned(), state.tab == value, Msg::Tab(value));
+    column![
+        row![
+            ui::page_title("AniList"),
+            ui::spacer(),
+            ui::tool(
+                Icon::List,
+                "Custom lists",
+                Some(Msg::OpenLists),
+                theme::secondary,
+                theme::PAPER
+            ),
+            ui::tool(
+                Icon::Plus,
+                "Add title",
+                Some(Msg::OpenAdd),
+                theme::track,
+                theme::INK
+            ),
+        ]
+        .spacing(theme::S2)
+        .align_y(Center),
+        column![
+            ui::tabs(
+                [
+                    tab("Overview", Tab::Overview),
+                    tab("Anime list", Tab::Anime),
+                    tab("Manga list", Tab::Manga),
+                ],
+                theme::TRACK,
+            ),
+            ui::divider()
+        ],
     ]
-    .spacing(8)
-    .align_y(Center)
+    .spacing(theme::S4)
     .into()
 }
 
 pub fn view(app: &App) -> Element<'_, Message> {
     let page: Element<'_, Msg> = if !app.auth.anilist_logged_in {
-        center(ui::muted(
-            "Log in to AniList in Settings to see your lists.",
-        ))
-        .into()
+        ui::empty_state(
+            Icon::List,
+            "Not connected to AniList",
+            "Log in to AniList in Settings to see and edit your lists.",
+        )
     } else {
         let body = match app.anilist.tab {
             Tab::Overview => overview(app),
             _ => list_view(app),
         };
-        column![tabs(&app.anilist), body]
-            .spacing(20)
-            .padding(24)
+        column![header(&app.anilist), body]
+            .spacing(theme::S5)
+            .padding(iced::Padding {
+                top: theme::S5,
+                right: ui::PAGE_PADDING,
+                bottom: 0.0,
+                left: ui::PAGE_PADDING,
+            })
             .into()
     };
     page.map(Message::AniList)
 }
 
-fn editor_body(editor: &Editor) -> iced::widget::Column<'_, Msg> {
-    let form = &editor.form;
-    let kind = editor.entry.media.kind;
-    let edit = |wrap: fn(String) -> EditorEdit| move |v: String| Msg::Edit(wrap(v));
-    let mut body = column![
-        column![
-            text("Status").size(12).color(theme::MUTED),
-            pick_list(
-                status_options(kind),
-                Some(StatusOption(form.status, kind)),
-                |o| Msg::Edit(EditorEdit::Status(o))
-            )
-            .padding(8),
-        ]
-        .spacing(4),
-        row![
-            ui::field(
-                if kind == MediaKind::Anime {
-                    "Episodes"
-                } else {
-                    "Chapters"
-                },
-                &form.progress,
-                edit(EditorEdit::Progress)
-            ),
-            ui::field("Score", &form.score, edit(EditorEdit::Score)),
-        ]
-        .spacing(10),
+fn status_pick<'a>(
+    kind: MediaKind,
+    status: ListStatus,
+    on_select: impl Fn(StatusOption) -> Msg + 'a,
+) -> Element<'a, Msg> {
+    pick_list(
+        status_options(kind),
+        Some(StatusOption(status, kind)),
+        on_select,
+    )
+    .text_size(theme::T_BODY)
+    .padding([8, 10])
+    .width(Fill)
+    .style(theme::pick)
+    .menu_style(theme::pick_menu)
+    .into()
+}
+
+/// Kurzangaben zu einem Werk, z. B. `TV · 2023 · 28 episodes`.
+fn media_facts(media: &Media) -> String {
+    let unit = if media.kind == MediaKind::Anime {
+        "episodes"
+    } else {
+        "chapters"
+    };
+    [
+        media.format.clone(),
+        media.season_year.map(|y| y.to_string()),
+        media.total_units().map(|t| format!("{t} {unit}")),
     ]
-    .spacing(12);
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join(", ")
+}
+
+fn group<'a>(name: &'a str, content: impl Into<Element<'a, Msg>>) -> Element<'a, Msg> {
+    column![
+        text(name)
+            .size(theme::T_SMALL)
+            .font(theme::SEMIBOLD)
+            .color(theme::PAPER),
+        content.into()
+    ]
+    .spacing(theme::S2)
+    .into()
+}
+
+fn editor_body<'a>(app: &'a App, editor: &'a Editor) -> iced::widget::Column<'a, Msg> {
+    let form = &editor.form;
+    let media = &editor.entry.media;
+    let kind = media.kind;
+    let edit = |wrap: fn(String) -> EditorEdit| move |v: String| Msg::Edit(wrap(v));
+    let head = row![
+        cover(app, media, 64.0, 90.0),
+        column![
+            text(ui::ellipsize(media.title.preferred(), 80))
+                .size(theme::T_TITLE)
+                .font(theme::DISPLAY),
+            ui::muted(media_facts(media)),
+            ui::tag(form.status.label(kind), theme::status_color(form.status)),
+        ]
+        .spacing(6),
+    ]
+    .spacing(theme::S4)
+    .align_y(Center);
+    let mut progress = row![
+        column![
+            ui::label("Status"),
+            status_pick(kind, form.status, |o| Msg::Edit(EditorEdit::Status(o))),
+        ]
+        .spacing(6)
+        .width(Fill),
+        container(ui::field(
+            if kind == MediaKind::Anime {
+                "Episodes"
+            } else {
+                "Chapters"
+            },
+            &form.progress,
+            edit(EditorEdit::Progress)
+        ))
+        .width(Fill),
+    ]
+    .spacing(theme::S3);
     if kind == MediaKind::Manga {
-        body = body.push(ui::field(
-            "Volumes",
-            &form.volumes,
-            edit(EditorEdit::Volumes),
+        progress = progress.push(
+            container(ui::field(
+                "Volumes",
+                &form.volumes,
+                edit(EditorEdit::Volumes),
+            ))
+            .width(Fill),
+        );
+    }
+    progress = progress
+        .push(container(ui::field("Score", &form.score, edit(EditorEdit::Score))).width(Fill));
+    let dates = row![
+        ui::field("Started", &form.started, edit(EditorEdit::Started)),
+        ui::field("Completed", &form.completed, edit(EditorEdit::Completed)),
+        ui::field(
+            if kind == MediaKind::Anime {
+                "Rewatches"
+            } else {
+                "Rereads"
+            },
+            &form.repeat,
+            edit(EditorEdit::Repeat)
+        ),
+        ui::field("Priority", &form.priority, edit(EditorEdit::Priority)),
+    ]
+    .spacing(theme::S3);
+    let mut body = column![
+        head,
+        ui::divider(),
+        group("Progress", progress),
+        group(
+            "Dates and repeats",
+            column![dates, ui::muted("Dates are written as YYYY-MM-DD.")].spacing(6)
+        ),
+        ui::field("Notes", &form.notes, edit(EditorEdit::Notes)),
+    ]
+    .spacing(theme::S4);
+    if !form.advanced.is_empty() {
+        let fields = form
+            .advanced
+            .iter()
+            .enumerate()
+            .map(|(index, (name, value))| {
+                container(ui::field(name, value, move |v| {
+                    Msg::Edit(EditorEdit::Advanced(index, v))
+                }))
+                .width(150)
+                .into()
+            });
+        body = body.push(group(
+            "Advanced scores",
+            row(fields)
+                .spacing(theme::S3)
+                .wrap()
+                .vertical_spacing(theme::S2),
         ));
     }
-    body = body
-        .push(
-            row![
-                ui::field("Repeats", &form.repeat, edit(EditorEdit::Repeat)),
-                ui::field("Priority", &form.priority, edit(EditorEdit::Priority)),
-            ]
-            .spacing(10),
-        )
-        .push(
-            row![
-                ui::field(
-                    "Started (YYYY-MM-DD)",
-                    &form.started,
-                    edit(EditorEdit::Started)
-                ),
-                ui::field(
-                    "Completed (YYYY-MM-DD)",
-                    &form.completed,
-                    edit(EditorEdit::Completed)
-                ),
-            ]
-            .spacing(10),
-        )
-        .push(ui::field("Notes", &form.notes, edit(EditorEdit::Notes)))
-        .push(
-            toggler(form.private)
-                .label("Private")
-                .text_size(14)
-                .on_toggle(|v| Msg::Edit(EditorEdit::Private(v))),
-        )
-        .push(
-            toggler(form.hidden)
-                .label("Hide from status lists")
-                .text_size(14)
-                .on_toggle(|v| Msg::Edit(EditorEdit::Hidden(v))),
-        );
-    for (index, (name, value)) in form.advanced.iter().enumerate() {
-        body = body.push(ui::field(name, value, move |v| {
-            Msg::Edit(EditorEdit::Advanced(index, v))
-        }));
+    if !form.lists.is_empty() {
+        let chips = form.lists.iter().enumerate().map(|(index, (name, on))| {
+            ui::chip(
+                name.as_str(),
+                *on,
+                Msg::Edit(EditorEdit::CustomList(index, !*on)),
+                theme::TRACK,
+            )
+        });
+        body = body.push(group(
+            "Custom lists",
+            row(chips)
+                .spacing(theme::S2)
+                .wrap()
+                .vertical_spacing(theme::S2),
+        ));
     }
-    for (index, (name, on)) in form.lists.iter().enumerate() {
-        body = body.push(
-            toggler(*on)
-                .label(name.as_str())
-                .text_size(14)
-                .on_toggle(move |v| Msg::Edit(EditorEdit::CustomList(index, v))),
-        );
-    }
+    body = body.push(group(
+        "Visibility",
+        row![
+            ui::toggle("Private", form.private, |v| Msg::Edit(EditorEdit::Private(
+                v
+            ))),
+            ui::toggle("Hide from status lists", form.hidden, |v| Msg::Edit(
+                EditorEdit::Hidden(v)
+            )),
+        ]
+        .spacing(theme::S5),
+    ));
     if let Some(error) = &editor.error {
         body = body.push(ui::error_line(error.as_str()));
     }
     let remove = if editor.confirm_delete {
-        ui::danger("Really remove", Msg::Delete)
+        ui::danger("Remove for good", Msg::Delete)
     } else {
-        ui::secondary("Remove from list", Msg::AskDelete)
+        ui::quiet("Remove from list", Msg::AskDelete)
     };
-    body.push(
+    body.push(ui::divider()).push(
         row![
             remove,
             ui::spacer(),
             ui::secondary("Cancel", Msg::Close),
-            ui::primary("Save", Msg::SaveEditor),
+            ui::primary("Save entry", Msg::SaveEditor),
         ]
-        .spacing(8),
+        .spacing(theme::S2)
+        .align_y(Center),
     )
 }
 
-fn add_body(dialog: &AddDialog) -> iced::widget::Column<'_, Msg> {
-    let results = dialog.results.iter().map(|media| {
-        let details = [
-            media.format.clone(),
-            media.season_year.map(|y| y.to_string()),
-            media.total_units().map(|t| format!("{t} units")),
-        ]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>()
-        .join(" · ");
-        row![
-            column![
-                text(ui::ellipsize(media.title.preferred(), 52)).size(14),
-                ui::muted(details),
+fn add_body<'a>(app: &'a App, dialog: &'a AddDialog) -> iced::widget::Column<'a, Msg> {
+    let results: Vec<Element<'a, Msg>> = dialog
+        .results
+        .iter()
+        .map(|media| {
+            let listed = app.core.entry_for(media.id).is_some();
+            let action: Element<'a, Msg> = if listed {
+                ui::tag("On your list", theme::TRACK)
+            } else {
+                ui::primary("Add", Msg::AddMedia(Box::new(media.clone())))
+            };
+            row![
+                cover(app, media, 40.0, 56.0),
+                column![
+                    text(ui::ellipsize(media.title.preferred(), 48))
+                        .size(theme::T_BODY)
+                        .font(theme::MEDIUM),
+                    ui::muted(media_facts(media)),
+                ]
+                .spacing(3)
+                .width(Fill),
+                action,
             ]
-            .width(Fill),
-            ui::primary("Add", Msg::AddMedia(Box::new(media.clone()))),
-        ]
-        .align_y(Center)
-        .into()
-    });
+            .spacing(theme::S3)
+            .padding([theme::S2, 0.0])
+            .align_y(Center)
+            .into()
+        })
+        .collect();
+    let list: Element<'a, Msg> = if dialog.searching {
+        ui::muted("Searching AniList…")
+    } else if results.is_empty() {
+        ui::muted("Search for a title, then add it with the status chosen above.")
+    } else {
+        ui::divided(results).into()
+    };
     column![
         row![
             text_input("Search AniList", &dialog.query)
                 .on_input(Msg::AddQuery)
                 .on_submit(Msg::AddSearch)
-                .padding(8)
+                .size(theme::T_BODY)
+                .padding([8, 10])
                 .style(theme::input),
             ui::primary("Search", Msg::AddSearch),
         ]
-        .spacing(8),
-        pick_list(
-            status_options(dialog.kind),
-            Some(StatusOption(dialog.status, dialog.kind)),
-            Msg::AddStatus
-        )
-        .padding(8),
-        if dialog.searching {
-            ui::muted("Searching…")
-        } else {
-            column(results).spacing(10).into()
-        },
-        ui::secondary("Close", Msg::Close),
+        .spacing(theme::S2)
+        .align_y(Center),
+        column![
+            ui::label("Add with status"),
+            status_pick(dialog.kind, dialog.status, Msg::AddStatus),
+        ]
+        .spacing(6),
+        list,
+        row![ui::spacer(), ui::secondary("Close", Msg::Close)],
     ]
-    .spacing(12)
+    .spacing(theme::S4)
 }
 
 fn lists_body(dialog: &ListsDialog) -> iced::widget::Column<'_, Msg> {
-    let rows = dialog.names.iter().map(|name| {
-        let editing = dialog.renaming.as_ref().filter(|(old, _)| old == name);
-        match editing {
-            Some((_, value)) => row![
-                text_input("", value)
-                    .on_input(Msg::RenameText)
-                    .on_submit(Msg::CommitRename)
-                    .padding(8)
-                    .style(theme::input),
-                ui::primary("Save", Msg::CommitRename),
-            ]
-            .spacing(8)
-            .into(),
-            None => row![
-                text(name).size(14).width(Fill),
-                ui::secondary("Rename", Msg::StartRename(name.clone())),
-                ui::danger("Delete", Msg::DeleteList(name.clone())),
-            ]
-            .spacing(8)
-            .align_y(Center)
-            .into(),
-        }
-    });
+    let rows: Vec<Element<'_, Msg>> = dialog
+        .names
+        .iter()
+        .map(|name| {
+            let editing = dialog.renaming.as_ref().filter(|(old, _)| old == name);
+            let line: Element<'_, Msg> = match editing {
+                Some((_, value)) => row![
+                    text_input("", value)
+                        .on_input(Msg::RenameText)
+                        .on_submit(Msg::CommitRename)
+                        .size(theme::T_BODY)
+                        .padding([8, 10])
+                        .style(theme::input),
+                    ui::primary("Save name", Msg::CommitRename),
+                ]
+                .spacing(theme::S2)
+                .align_y(Center)
+                .into(),
+                None => row![
+                    text(name).size(theme::T_BODY).width(Fill),
+                    ui::icon_button(
+                        Icon::Edit,
+                        15.0,
+                        theme::MUTED,
+                        Some(Msg::StartRename(name.clone())),
+                        "Rename",
+                        theme::quiet
+                    ),
+                    ui::icon_button(
+                        Icon::Trash,
+                        15.0,
+                        theme::BAD,
+                        Some(Msg::DeleteList(name.clone())),
+                        "Delete list",
+                        theme::quiet
+                    ),
+                ]
+                .spacing(theme::S1)
+                .align_y(Center)
+                .into(),
+            };
+            container(line).padding([6.0, 0.0]).into()
+        })
+        .collect();
+    let list: Element<'_, Msg> = if rows.is_empty() {
+        ui::muted("No custom lists yet. Create one below.")
+    } else {
+        ui::divided(rows).into()
+    };
     column![
-        column(rows).spacing(8),
+        list,
         row![
-            text_input("New list", &dialog.new_name)
+            text_input("New list name", &dialog.new_name)
                 .on_input(Msg::NewListName)
                 .on_submit(Msg::CreateList)
-                .padding(8)
+                .size(theme::T_BODY)
+                .padding([8, 10])
                 .style(theme::input),
-            ui::primary("Create", Msg::CreateList),
+            ui::primary("Create list", Msg::CreateList),
         ]
-        .spacing(8),
-        ui::secondary("Close", Msg::Close),
+        .spacing(theme::S2)
+        .align_y(Center),
+        row![ui::spacer(), ui::secondary("Close", Msg::Close)],
     ]
-    .spacing(14)
+    .spacing(theme::S4)
 }
 
 /// Legt den offenen AniList-Dialog über die Seite.
@@ -1019,13 +1456,25 @@ pub fn with_modal<'a>(app: &'a App, base: Element<'a, Message>) -> Element<'a, M
         return base;
     };
     let (title, width, body) = match modal {
-        Modal::Editor(editor) => (
-            editor.entry.media.title.preferred(),
-            560.0,
-            editor_body(editor),
+        Modal::Editor(editor) => ("Edit entry", 640.0, editor_body(app, editor)),
+        Modal::Add(dialog) => (
+            if dialog.kind == MediaKind::Anime {
+                "Add anime"
+            } else {
+                "Add manga"
+            },
+            580.0,
+            add_body(app, dialog),
         ),
-        Modal::Add(dialog) => ("Add to list", 560.0, add_body(dialog)),
-        Modal::Lists(dialog) => ("Custom lists", 480.0, lists_body(dialog)),
+        Modal::Lists(dialog) => (
+            if dialog.kind == MediaKind::Anime {
+                "Custom anime lists"
+            } else {
+                "Custom manga lists"
+            },
+            480.0,
+            lists_body(dialog),
+        ),
     };
     ui::modal(
         base,

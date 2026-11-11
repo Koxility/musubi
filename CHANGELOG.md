@@ -2,6 +2,23 @@
 
 All notable changes to Musubi are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Profile page** (`Ctrl+7`) with your AniList statistics for anime and manga: totals, time watched, mean score, the split by status, score and release-year charts, and genre and format rankings. Picking a status opens that list for editing. The last copy stays available offline.
+- The Settings page shows the app version and git commit at the bottom.
+- Scroll arrows on the Home shelves.
+
+### Changed
+
+- **New look.** A design system with bundled fonts (Sora and Hanken Grotesk) replaces the default styling. Red marks watching on Jellyfin, teal marks tracking on AniList.
+- The sidebar groups pages into Watch, Track and Connect and shows who is logged in.
+- Home has a larger hero for what to continue; the library has library tabs, poster marks for watched and matched titles, and a detail page with an AniList strip.
+- The AniList overview shows key numbers and an airing schedule; lists are tables grouped by status with counts.
+- New app icon: two cords tied into a knot.
+- The window now reports the application ID `io.github.musubi.Musubi`, so desktops group it with its launcher entry.
+
 ## [0.1.1] - 2026-11-10
 
 ### Fixed

@@ -10,6 +10,7 @@ mod icons;
 mod images;
 mod library;
 mod mapping;
+mod profile;
 mod settings;
 mod setup;
 mod sync;
@@ -25,7 +26,7 @@ pub use video::{VideoLink, embedded_player};
 
 /// Startet die GUI und kehrt beim Schließen des Fensters zurück.
 pub fn run(core: Core, video: Option<VideoLink>) -> anyhow::Result<()> {
-    iced::application(
+    let mut app = iced::application(
         move || App::boot(core.clone(), video.clone()),
         App::update,
         App::view,
@@ -33,7 +34,21 @@ pub fn run(core: Core, video: Option<VideoLink>) -> anyhow::Result<()> {
     .title("Musubi")
     .theme(App::theme)
     .subscription(App::subscription)
-    .window_size((1360.0, 880.0))
-    .run()
-    .context("could not start the GUI")
+    .default_font(theme::BODY)
+    .window(iced::window::Settings {
+        size: iced::Size::new(1360.0, 880.0),
+        min_size: Some(iced::Size::new(960.0, 620.0)),
+        // Ohne lesbares Icon startet die App trotzdem.
+        icon: iced::window::icon::from_file_data(include_bytes!("../assets/icon.png"), None).ok(),
+        platform_specific: iced::window::settings::PlatformSpecific {
+            // Muss zu `StartupWMClass` in `packaging/musubi.desktop` passen.
+            application_id: "io.github.musubi.Musubi".to_owned(),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    for font in theme::FONT_FILES {
+        app = app.font(font);
+    }
+    app.run().context("could not start the GUI")
 }

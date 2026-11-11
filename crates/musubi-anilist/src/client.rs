@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
-use musubi_domain::{EntryPatch, ListEntry, Media, MediaKind, Viewer};
+use musubi_domain::{EntryPatch, ListEntry, Media, MediaKind, Profile, Viewer};
 use reqwest::StatusCode;
 use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap};
 use secrecy::{ExposeSecret, SecretString};
@@ -115,6 +115,12 @@ impl Client {
 
     pub async fn viewer(&self) -> Result<Viewer> {
         let data: ViewerData = self.graphql(VIEWER.to_owned(), json!({})).await?;
+        Ok(data.viewer.into())
+    }
+
+    /// Öffentliches Profil mit der Statistik über Anime und Manga.
+    pub async fn profile(&self) -> Result<Profile> {
+        let data: ProfileData = self.graphql(PROFILE.to_owned(), json!({})).await?;
         Ok(data.viewer.into())
     }
 

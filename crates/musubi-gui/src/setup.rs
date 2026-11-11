@@ -1,7 +1,7 @@
 //! Geführte Einrichtung: Jellyfin, AniList und Sync in drei Schritten.
 
-use iced::widget::{Column, column, row, text, toggler};
-use iced::{Center, Element, Task};
+use iced::widget::{Column, column, container, row, text};
+use iced::{Center, Element, Fill, Task};
 use musubi_core::{AuthStatus, Config, Core, oauth};
 use secrecy::SecretString;
 
@@ -253,11 +253,21 @@ pub fn update(app: &mut App, msg: Msg) -> Task<Message> {
     Task::none()
 }
 
-fn status<'a>(value: String) -> Element<'a, Msg> {
+/// Verbindungsstand eines Dienstes in seiner Kordelfarbe.
+fn status<'a>(connected: bool, detail: String, cord: iced::Color) -> Element<'a, Msg> {
     row![
-        text("Status").size(14).width(70).color(theme::MUTED),
-        text(value).size(14)
+        ui::tag(
+            if connected {
+                "Connected"
+            } else {
+                "Not connected"
+            },
+            if connected { cord } else { theme::MUTED }
+        ),
+        ui::muted(detail),
     ]
+    .spacing(theme::S2)
+    .align_y(Center)
     .into()
 }
 
@@ -265,7 +275,11 @@ fn jellyfin_step<'a>(state: &'a State, auth: &AuthStatus) -> Column<'a, Msg> {
     let edit = |wrap: fn(String) -> Edit| move |v: String| Msg::Edit(wrap(v));
     column![
         ui::muted("Enter the server address with its port, for example 192.168.1.10:8096."),
-        status(jellyfin_status(auth)),
+        status(
+            auth.jellyfin_user.is_some(),
+            jellyfin_status(auth),
+            theme::WATCH
+        ),
         ui::field("Server URL", &state.url, edit(Edit::Url)),
         ui::field("Username", &state.user, edit(Edit::User)),
         ui::secret_field(
@@ -274,50 +288,139 @@ fn jellyfin_step<'a>(state: &'a State, auth: &AuthStatus) -> Column<'a, Msg> {
             edit(Edit::Password),
             Some(Msg::LoginJellyfin)
         ),
-        ui::secret_field("or API key", &state.api_key, edit(Edit::ApiKey), None),
-        ui::primary("Log in", Msg::LoginJellyfin),
+        ui::secret_field(
+            "Or an API key instead of the password",
+            &state.api_key,
+            edit(Edit::ApiKey),
+            None
+        ),
+        row![ui::watch("Log in to Jellyfin", Msg::LoginJellyfin)],
     ]
-    .spacing(12)
+    .spacing(theme::S3)
 }
 
 fn anilist_step<'a>(state: &'a State, auth: &AuthStatus) -> Column<'a, Msg> {
     let edit = |wrap: fn(String) -> Edit| move |v: String| Msg::Edit(wrap(v));
     column![
-        ui::muted("Musubi has no built-in AniList app. Create your own once, the client secret is not needed."),
-        status(anilist_status(auth)),
-        ui::secondary("Open AniList developer page", Msg::OpenDeveloperPage),
-        text(format!("Redirect URL: {}", state.redirect)).size(14),
+        ui::muted("Musubi has no built-in AniList app. Create your own once; the client secret is not needed."),
+        status(auth.anilist_logged_in, anilist_status(auth), theme::TRACK),
+        row![ui::secondary(
+            "Open the AniList developer page",
+            Msg::OpenDeveloperPage
+        )],
+        column![
+            ui::label("Redirect URL for that app"),
+            container(
+                text(&state.redirect)
+                    .size(theme::T_SMALL)
+                    .color(theme::MUTED)
+            )
+            .padding([9, 10])
+            .width(Fill)
+            .style(theme::inset),
+        ]
+        .spacing(6),
         ui::field("Client ID", &state.client_id, edit(Edit::ClientId)),
-        ui::primary("Log in with browser", Msg::LoginAniListBrowser),
+        row![ui::primary("Log in with browser", Msg::LoginAniListBrowser)],
+        ui::divider(),
         ui::secret_field(
-            "Token or redirect URL (without browser login)",
+            "Token or redirect URL, if you log in without the browser flow",
             &state.token,
             edit(Edit::Token),
             Some(Msg::LoginAniListToken)
         ),
-        ui::secondary("Use pasted token", Msg::LoginAniListToken),
+        row![ui::secondary("Use pasted token", Msg::LoginAniListToken)],
     ]
-    .spacing(12)
+    .spacing(theme::S3)
 }
 
 fn sync_step<'a>(state: &'a State, auth: &AuthStatus) -> Column<'a, Msg> {
+    let line = |name: &'a str, connected: bool, detail: String, cord| {
+        row![
+            text(name)
+                .size(theme::T_SMALL)
+                .font(theme::MEDIUM)
+                .width(70),
+            status(connected, detail, cord)
+        ]
+        .align_y(Center)
+    };
     column![
-        ui::muted("You can preview and apply changes on the Sync page at any time."),
-        row![
-            text("Jellyfin").size(14).width(70).color(theme::MUTED),
-            text(jellyfin_status(auth)).size(14)
-        ],
-        row![
-            text("AniList").size(14).width(70).color(theme::MUTED),
-            text(anilist_status(auth)).size(14)
-        ],
-        toggler(state.auto_sync)
-            .label("Update AniList automatically while watching")
-            .text_size(14)
-            .on_toggle(|v| Msg::Edit(Edit::AutoSync(v))),
-        ui::muted("When off, AniList only changes when you apply a sync."),
+        line(
+            "Jellyfin",
+            auth.jellyfin_user.is_some(),
+            jellyfin_status(auth),
+            theme::WATCH
+        ),
+        line(
+            "AniList",
+            auth.anilist_logged_in,
+            anilist_status(auth),
+            theme::TRACK
+        ),
+        ui::divider(),
+        ui::toggle(
+            "Update AniList automatically while watching",
+            state.auto_sync,
+            |v| Msg::Edit(Edit::AutoSync(v))
+        ),
+        ui::muted(
+            "When off, AniList only changes when you apply a sync. You can preview and apply changes on the Sync page at any time."
+        ),
     ]
-    .spacing(12)
+    .spacing(theme::S3)
+}
+
+/// Die drei Schritte der Einrichtung als Leiste: erledigt, aktuell, offen.
+fn steps<'a>(current: u8) -> Element<'a, Msg> {
+    let names = ["Jellyfin", "AniList", "Sync"];
+    let mut bar = row![].spacing(theme::S2).align_y(Center);
+    for (index, name) in names.into_iter().enumerate() {
+        let number = index as u8 + 1;
+        let (fill, ink) = match number.cmp(&current) {
+            std::cmp::Ordering::Less => (theme::alpha(theme::TRACK, 0.25), theme::TRACK),
+            std::cmp::Ordering::Equal => (theme::TRACK, theme::INK),
+            std::cmp::Ordering::Greater => (theme::RAISED, theme::MUTED),
+        };
+        if index > 0 {
+            bar = bar.push(
+                container(iced::widget::Space::new())
+                    .width(28)
+                    .height(1)
+                    .style(theme::line),
+            );
+        }
+        bar = bar.push(
+            row![
+                container(
+                    iced::widget::center(
+                        text(number.to_string())
+                            .size(theme::T_LABEL)
+                            .font(theme::SEMIBOLD)
+                            .color(ink)
+                    )
+                    .width(22)
+                    .height(22)
+                )
+                .style(theme::solid(fill, theme::PILL)),
+                text(name)
+                    .size(theme::T_SMALL)
+                    .font(if number == current {
+                        theme::SEMIBOLD
+                    } else {
+                        theme::MEDIUM
+                    })
+                    .color(if number == current {
+                        theme::PAPER
+                    } else {
+                        theme::MUTED
+                    }),
+            ]
+            .spacing(theme::S2)
+            .align_y(Center),
+        );
+    }
+    bar.into()
 }
 
 /// Legt die Einrichtung über die App.
@@ -327,10 +430,10 @@ pub fn with_modal<'a>(
     base: Element<'a, Message>,
 ) -> Element<'a, Message> {
     let auth = &app.auth;
-    let (name, mut body) = match state.step {
-        Step::Jellyfin => ("Jellyfin", jellyfin_step(state, auth)),
-        Step::AniList => ("AniList", anilist_step(state, auth)),
-        Step::Sync => ("Sync", sync_step(state, auth)),
+    let mut body = match state.step {
+        Step::Jellyfin => jellyfin_step(state, auth),
+        Step::AniList => anilist_step(state, auth),
+        Step::Sync => sync_step(state, auth),
     };
     if let Some((message, error)) = &state.message {
         body = body.push(if *error {
@@ -347,25 +450,27 @@ pub fn with_modal<'a>(
     let next_label = match (state.step, logged_in) {
         (Step::Sync, _) => "Finish",
         (_, true) => "Continue",
-        (_, false) => "Skip",
+        (_, false) => "Skip this step",
     };
     let next = if logged_in {
         ui::primary(next_label, Msg::Next)
     } else {
         ui::secondary(next_label, Msg::Next)
     };
-    let mut actions = row![ui::secondary("Close", Msg::Close), ui::spacer()]
-        .spacing(8)
+    let mut actions = row![ui::quiet("Close", Msg::Close), ui::spacer()]
+        .spacing(theme::S2)
         .align_y(Center);
     if state.step != Step::Jellyfin {
         actions = actions.push(ui::secondary("Back", Msg::Back));
     }
     let body = column![
-        ui::muted(format!("Step {} of 3: {name}", state.step.number())),
+        steps(state.step.number()),
+        ui::divider(),
         body,
+        ui::divider(),
         actions.push(next),
     ]
-    .spacing(16);
+    .spacing(theme::S4);
     ui::modal(
         base,
         "Set up Musubi",

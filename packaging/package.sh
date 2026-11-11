@@ -38,6 +38,9 @@ install -m755 target/release/musubi "dist/$name/musubi"
 install -m755 packaging/install.sh "dist/$name/install.sh"
 install -m644 packaging/musubi.desktop packaging/musubi.svg \
     README.md CHANGELOG.md LICENSE "dist/$name/"
+# The binary embeds these fonts; their licence asks to ship its text along.
+install -m644 crates/musubi-gui/fonts/Sora-OFL.txt \
+    crates/musubi-gui/fonts/HankenGrotesk-OFL.txt "dist/$name/"
 tar -C dist -czf "dist/$name.tar.gz" "$name"
 (cd dist && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256")
 printf '%s\n' "$notes" | sed -e '/./,$!d' > dist/notes.md

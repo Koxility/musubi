@@ -2,14 +2,13 @@
 
 use std::fmt;
 
-use iced::widget::{
-    Column, column, container, pick_list, progress_bar, row, scrollable, text, text_input, toggler,
-};
-use iced::{Center, Element, Fill, Length, Task};
+use iced::widget::{Column, column, container, pick_list, row, text, text_input};
+use iced::{Center, Element, Fill, Task};
 use musubi_core::domain::{LibraryItem, Mapping, MappingSource, Media, MediaKind};
 use musubi_core::{ReviewCandidate, ReviewItem};
 
 use crate::app::{App, Message};
+use crate::icons::Icon;
 use crate::{library, theme, ui};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -423,16 +422,21 @@ fn season_line<'a>(
         })
         .collect();
     let unsure = mappings.iter().any(|m| m.source == MappingSource::Guess);
-    let mut heading = row![text(season_label(season)).size(14).width(90)]
-        .spacing(8)
-        .align_y(Center);
+    let mut heading = row![
+        text(season_label(season))
+            .size(theme::T_SMALL)
+            .font(theme::MEDIUM)
+            .width(90)
+    ]
+    .spacing(theme::S2)
+    .align_y(Center);
     heading = heading.push(
         column(parts.into_iter().map(ui::muted))
             .spacing(2)
             .width(Fill),
     );
     if unsure {
-        heading = heading.push(ui::badge_row("unsure".to_owned(), theme::ORANGE));
+        heading = heading.push(ui::tag("Unsure, not synced", theme::WARN));
     }
     let id = mappings
         .first()
@@ -453,7 +457,15 @@ fn season_line<'a>(
         (None, None) => ui::muted(""),
     });
     heading
-        .push(ui::secondary("Remove", Msg::UnmapSeason(id, season)))
+        .push(ui::icon_button(
+            Icon::Trash,
+            15.0,
+            theme::BAD,
+            Some(Msg::UnmapSeason(id, season)),
+            "Remove this match",
+            theme::quiet,
+        ))
+        .padding(iced::padding::left(30))
         .into()
 }
 
@@ -472,52 +484,88 @@ fn mapped_title<'a>(app: &'a App, id: &'a str, mappings: Vec<&'a Mapping>) -> El
             .collect();
         season_line(item, season, &of_season)
     });
-    let mut heading = row![text(ui::ellipsize(name, 64)).size(16).width(Fill)]
-        .spacing(8)
-        .align_y(Center);
+    let unsure = mappings.iter().any(|m| m.source == MappingSource::Guess);
+    let mark = if unsure {
+        ui::icon(Icon::Question, 18.0, theme::WARN)
+    } else {
+        ui::icon(Icon::Knot, 18.0, theme::TRACK)
+    };
+    let mut heading = row![
+        mark,
+        text(ui::ellipsize(name, 64))
+            .size(theme::T_BODY)
+            .font(theme::SEMIBOLD)
+            .width(Fill)
+    ]
+    .spacing(theme::S3)
+    .align_y(Center);
     if let Some(item) = item {
         heading = heading.push(ui::secondary(
             "All seasons…",
             Msg::OpenChange(Box::new(item.clone()), None),
         ));
     }
-    container(column![heading, column(lines).spacing(6)].spacing(8))
-        .padding(6)
+    container(column![heading, column(lines).spacing(theme::S1)].spacing(theme::S2))
+        .padding([theme::S3, theme::S2])
         .into()
 }
 
 fn unmatched_row(item: &LibraryItem) -> Element<'_, Msg> {
     row![
-        text(ui::ellipsize(&item.name, 80)).size(15).width(Fill),
-        ui::secondary("Choose…", Msg::OpenChange(Box::new(item.clone()), None)),
+        ui::icon(Icon::Link, 18.0, theme::FAINT),
+        text(ui::ellipsize(&item.name, 80))
+            .size(theme::T_BODY)
+            .font(theme::MEDIUM)
+            .width(Fill),
+        ui::secondary(
+            "Choose match…",
+            Msg::OpenChange(Box::new(item.clone()), None)
+        ),
     ]
-    .spacing(8)
+    .spacing(theme::S3)
+    .padding([theme::S2, theme::S2])
     .align_y(Center)
     .into()
 }
 
+fn group<'a>(rows: Vec<Element<'a, Msg>>) -> Element<'a, Msg> {
+    container(ui::divided(rows))
+        .padding([theme::S1, theme::S2])
+        .width(Fill)
+        .style(theme::surface)
+        .into()
+}
+
 pub fn view(app: &App) -> Element<'_, Message> {
     let state = &app.mapping;
-    let mut body = column![
-        row![
-            ui::heading("Mapping"),
-            ui::spacer(),
-            ui::secondary("Match again", Msg::MatchAgain),
-        ]
-        .align_y(Center),
-        ui::muted("Titles are matched automatically. Change anything here or on a title's page."),
-    ]
-    .spacing(18)
-    .padding(iced::padding::right(14));
+    let mut body = column![ui::page_header(
+        "Mapping",
+        Some(
+            "Jellyfin titles are matched to AniList automatically. Fix a match here or on the title's page; unsure matches are not synced until you confirm them."
+                .to_owned()
+        ),
+        vec![ui::tool(
+            Icon::Sync,
+            "Match again",
+            Some(Msg::MatchAgain),
+            theme::secondary,
+            theme::PAPER
+        )],
+    )]
+    .spacing(theme::S5)
+    .padding(iced::Padding {
+        top: theme::S5,
+        right: ui::PAGE_PADDING,
+        bottom: theme::S6,
+        left: ui::PAGE_PADDING,
+    });
     if let Some((done, total)) = state.progress {
         body = body.push(
             row![
-                progress_bar(0.0..=total.max(1) as f32, done as f32)
-                    .length(Length::Fill)
-                    .girth(8),
-                ui::muted(format!("{done} / {total}")),
+                ui::bar(done as f32 / total.max(1) as f32, theme::TRACK, 6.0),
+                ui::muted(format!("Matching {done} of {total}")),
             ]
-            .spacing(10)
+            .spacing(theme::S3)
             .align_y(Center),
         );
     }
@@ -529,9 +577,11 @@ pub fn view(app: &App) -> Element<'_, Message> {
         .map(|r| unmatched_row(&r.item))
         .collect();
     if !unmatched.is_empty() {
-        body = body
-            .push(text(format!("Without a match ({})", unmatched.len())).size(16))
-            .push(ui::card(column(unmatched).spacing(8)));
+        let count = unmatched.len();
+        body = body.push(ui::section(
+            ui::heading_count("Without a match", count),
+            group(unmatched),
+        ));
     }
     // Titel mit unsicheren Staffeln zuerst, sonst in der Reihenfolge der Datenbank.
     let mut titles: Vec<(&str, Vec<&Mapping>)> = Vec::new();
@@ -546,27 +596,41 @@ pub fn view(app: &App) -> Element<'_, Message> {
         .into_iter()
         .map(|(id, list)| mapped_title(app, id, list))
         .collect();
-    body = body
-        .push(text(format!("Matched titles ({})", mapped.len())).size(16))
-        .push(ui::card(column(mapped).spacing(4)));
-    let page: Element<'_, Msg> = scrollable(body).width(Fill).height(Fill).into();
-    let page = container(page).padding(24);
-    Element::from(page).map(Message::Mapping)
+    let count = mapped.len();
+    let matched: Element<'_, Msg> = if mapped.is_empty() {
+        ui::muted("Nothing matched yet. Matches appear here once both services are connected.")
+    } else {
+        group(mapped)
+    };
+    body = body.push(ui::section(
+        ui::heading_count("Matched titles", count),
+        matched,
+    ));
+    let page: Element<'_, Msg> = ui::scroll(body);
+    page.map(Message::Mapping)
 }
 
 fn choice_line<'a>(title: &str, details: String, media: i64) -> Element<'a, Msg> {
     row![
-        column![text(ui::ellipsize(title, 56)).size(14), ui::muted(details),].width(Fill),
-        ui::primary("Use", Msg::UseMedia(media)),
+        column![
+            text(ui::ellipsize(title, 56))
+                .size(theme::T_BODY)
+                .font(theme::MEDIUM),
+            ui::muted(details),
+        ]
+        .spacing(2)
+        .width(Fill),
+        ui::primary("Use this", Msg::UseMedia(media)),
     ]
-    .spacing(8)
+    .spacing(theme::S3)
+    .padding([6.0, 0.0])
     .align_y(Center)
     .into()
 }
 
 fn candidate_line<'a>(candidate: &ReviewCandidate) -> Element<'a, Msg> {
     let details = format!(
-        "{} · {} · {} eps · match {:.0}%",
+        "{}, {}, {} episodes, {:.0}% match",
         candidate.format.as_deref().unwrap_or("?"),
         candidate.year.map_or("?".to_owned(), |y| y.to_string()),
         candidate.episodes.map_or("?".to_owned(), |e| e.to_string()),
@@ -577,7 +641,7 @@ fn candidate_line<'a>(candidate: &ReviewCandidate) -> Element<'a, Msg> {
 
 fn result_line<'a>(media: &Media) -> Element<'a, Msg> {
     let details = format!(
-        "{} · {} · {} eps",
+        "{}, {}, {} episodes",
         media.format.as_deref().unwrap_or("?"),
         media.season_year.map_or("?".to_owned(), |y| y.to_string()),
         media.episodes.map_or("?".to_owned(), |e| e.to_string()),
@@ -612,18 +676,26 @@ fn change_body<'a>(app: &'a App, view: ChangeView<'a>) -> Column<'a, Msg> {
     } else {
         format!("Currently: {}", ui::ellipsize(&titles.join(", "), 80))
     };
-    let mut body = column![].spacing(12);
+    let label = |name: &'a str| {
+        text(name)
+            .size(theme::T_SMALL)
+            .font(theme::SEMIBOLD)
+            .color(theme::PAPER)
+    };
+    let mut body = column![].spacing(theme::S3);
     if view.seasons.len() > 1 || view.scope.0.is_some() {
         let mut choices = vec![Scope(None)];
         choices.extend(view.seasons.iter().map(|s| Scope(Some(*s))));
         body = body.push(
             row![
-                text("Apply to").size(14).color(theme::MUTED),
+                ui::muted("Apply to"),
                 pick_list(choices, Some(view.scope), Msg::Scope)
-                    .text_size(14)
-                    .padding([6, 10]),
+                    .text_size(theme::T_SMALL)
+                    .padding([7, 12])
+                    .style(theme::pick)
+                    .menu_style(theme::pick_menu),
             ]
-            .spacing(10)
+            .spacing(theme::S3)
             .align_y(Center),
         );
     }
@@ -639,53 +711,54 @@ fn change_body<'a>(app: &'a App, view: ChangeView<'a>) -> Column<'a, Msg> {
         .unwrap_or_default();
     if !suggestions.is_empty() {
         body = body
-            .push(text("Suggestions").size(16))
-            .push(column(suggestions).spacing(8));
+            .push(label("Suggestions"))
+            .push(ui::divided(suggestions));
     }
-    body = body.push(text("Search AniList").size(16)).push(
+    body = body.push(label("Search AniList")).push(
         row![
             text_input("Title", view.query)
                 .on_input(Msg::Query)
                 .on_submit(Msg::Search)
-                .padding(8)
+                .size(theme::T_BODY)
+                .padding([8, 10])
                 .style(theme::input),
             ui::secondary("Search", Msg::Search),
         ]
-        .spacing(8),
+        .spacing(theme::S2)
+        .align_y(Center),
     );
     if view.searching {
-        body = body.push(ui::muted("Searching…"));
+        body = body.push(ui::muted("Searching AniList…"));
     } else if !view.results.is_empty() {
-        body = body.push(column(view.results.iter().map(result_line)).spacing(8));
+        body = body.push(ui::divided(view.results.iter().map(result_line).collect()));
     }
     body = body
         .push(
             row![
                 container(ui::field(
-                    "or AniList ID (the number in the URL)",
+                    "Or enter the AniList ID (the number in the URL)",
                     view.id,
                     Msg::MapId
                 ))
                 .width(Fill),
                 ui::secondary("Use ID", Msg::SubmitId),
             ]
-            .spacing(8)
+            .spacing(theme::S2)
             .align_y(iced::Bottom),
         )
-        .push(
-            toggler(view.follow)
-                .label(if view.scope.0.is_some() {
-                    "Split the season over several AniList entries"
-                } else {
-                    "Assign sequels to later seasons"
-                })
-                .text_size(14)
-                .on_toggle(Msg::MapFollow),
-        );
+        .push(ui::toggle(
+            if view.scope.0.is_some() {
+                "Split the season over several AniList entries"
+            } else {
+                "Assign sequels to later seasons"
+            },
+            view.follow,
+            Msg::MapFollow,
+        ));
     if let Some(error) = view.error {
         body = body.push(ui::error_line(error));
     }
-    let mut actions = row![].spacing(8);
+    let mut actions = row![].spacing(theme::S2).align_y(Center);
     if let Some(first) = current.first() {
         let remove = match view.scope.0 {
             Some(season) => Msg::UnmapSeason(view.item.id.clone(), season),
@@ -698,7 +771,7 @@ fn change_body<'a>(app: &'a App, view: ChangeView<'a>) -> Column<'a, Msg> {
                 Msg::OpenEdit(Box::new((*first).clone())),
             ));
     }
-    body.push(
+    body.push(ui::divider()).push(
         actions
             .push(ui::spacer())
             .push(ui::secondary("Close", Msg::Close)),
@@ -708,12 +781,12 @@ fn change_body<'a>(app: &'a App, view: ChangeView<'a>) -> Column<'a, Msg> {
 fn edit_body<'a>(form: &'a MappingForm, error: Option<&'a str>) -> Column<'a, Msg> {
     let edit = |wrap: fn(String) -> FormEdit| move |v: String| Msg::Edit(wrap(v));
     let mut body = column![
-        ui::muted("AniList episode = Jellyfin episode + offset"),
+        ui::muted("The AniList episode is the Jellyfin episode plus the offset."),
         ui::field("AniList ID", &form.media, edit(FormEdit::Media)),
         ui::field("Season", &form.season, edit(FormEdit::Season)),
         ui::field("First episode", &form.start, edit(FormEdit::Start)),
         ui::field(
-            "Last episode (empty = open)",
+            "Last episode (leave empty for no end)",
             &form.end,
             edit(FormEdit::End)
         ),
@@ -727,9 +800,9 @@ fn edit_body<'a>(form: &'a MappingForm, error: Option<&'a str>) -> Column<'a, Ms
         row![
             ui::spacer(),
             ui::secondary("Cancel", Msg::Close),
-            ui::primary("Save", Msg::SubmitEdit),
+            ui::primary("Save match", Msg::SubmitEdit),
         ]
-        .spacing(8),
+        .spacing(theme::S2),
     )
 }
 
