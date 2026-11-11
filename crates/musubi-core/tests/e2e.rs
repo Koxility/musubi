@@ -936,13 +936,15 @@ async fn profile_statistics_are_fetched_cached_and_cleared_on_logout() {
                 json!({"Viewer": {
                     "name": "eden", "siteUrl": "https://anilist.co/user/eden",
                     "bannerImage": null, "avatar": {"large": "https://img.example/a.png"},
+                    "mediaListOptions": {"scoreFormat": "POINT_10"},
                     "statistics": {
                         "anime": {
                             "count": 3, "meanScore": 81.5, "standardDeviation": 6.0,
                             "minutesWatched": 2880, "episodesWatched": 120,
                             "statuses": [{"status": "COMPLETED", "count": 2},
                                 {"status": "CURRENT", "count": 1}],
-                            "scores": [{"score": 80, "count": 2}, {"score": 85, "count": 1}],
+                            "scores": [{"score": 8, "count": 3}, {"score": 10, "count": 1},
+                                {"score": 3, "count": 2}],
                             "formats": [{"format": "TV", "count": 3, "meanScore": 81.5,
                                 "minutesWatched": 2880}],
                             "genres": [{"genre": "Drama", "count": 2, "meanScore": 84.0,
@@ -978,7 +980,10 @@ async fn profile_statistics_are_fetched_cached_and_cleared_on_logout() {
     assert_eq!(profile.anime.count, 3);
     assert_eq!(profile.anime.days_watched(), 2.0);
     assert_eq!(profile.anime.status_count(ListStatus::Completed), 2);
+    // AniList reports the buckets on the user's 1 to 10 scale.
     assert_eq!(profile.anime.score_counts()[7], (80, 3));
+    assert_eq!(profile.anime.score_counts()[9], (100, 1));
+    assert_eq!(profile.anime.score_counts()[2], (30, 2));
     assert_eq!(profile.anime.genres[0].key, "Drama");
     assert_eq!(profile.anime.genres.len(), 1);
     assert_eq!(profile.anime.release_years[0].key, "2019");

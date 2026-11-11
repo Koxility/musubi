@@ -225,17 +225,18 @@ fn profile_json() -> Value {
             .map(|(status, count, mean, value)| json!({"status": status, "count": count, "meanScore": mean, amount: value}))
             .collect()
     };
+    // AniList reports score buckets in the user's own scale, here 1 to 10.
     let scores: Vec<Value> = [
-        (10, 1),
-        (20, 2),
-        (30, 4),
-        (40, 9),
-        (50, 17),
-        (60, 34),
-        (70, 71),
-        (80, 68),
-        (90, 31),
-        (100, 9),
+        (1, 1),
+        (2, 2),
+        (3, 4),
+        (4, 9),
+        (5, 17),
+        (6, 34),
+        (7, 71),
+        (8, 68),
+        (9, 31),
+        (10, 9),
     ]
     .iter()
     .map(|(score, count)| json!({"score": score, "count": count}))
@@ -262,6 +263,7 @@ fn profile_json() -> Value {
         "avatar": {"large": format!("{base}/Items/avatar/Images/Square")},
         "bannerImage": format!("{base}/Items/banner/Images/Backdrop"),
         "siteUrl": "https://anilist.co/user/demo-user",
+        "mediaListOptions": {"scoreFormat": "POINT_10_DECIMAL"},
         "statistics": {
             "anime": {
                 "count": 350, "meanScore": 76.8, "standardDeviation": 13.2,

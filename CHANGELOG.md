@@ -4,6 +4,10 @@ All notable changes to Musubi are documented here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Fixed
+
+- The Profile score distribution showed every score in the column for 10 and nothing else for users who score out of 10, 5 or 3. AniList reports these scores on the user's own scale; they are now converted.
+
 ## [0.2.0] - 2026-11-11
 
 ### Added

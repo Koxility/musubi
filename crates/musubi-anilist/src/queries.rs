@@ -32,12 +32,14 @@ query {
   }
 }";
 
-/// Profil und Statistik. Die Sortierung übernimmt die GUI, AniList liefert alle Gruppen.
+/// Profile and statistics. The GUI sorts; AniList returns every group. The score format
+/// is needed to read `scores`, which AniList reports in the user's own scale.
 pub const PROFILE: &str = "
 query {
   Viewer {
     name siteUrl bannerImage
     avatar { large }
+    mediaListOptions { scoreFormat }
     statistics {
       anime {
         count meanScore standardDeviation minutesWatched episodesWatched
