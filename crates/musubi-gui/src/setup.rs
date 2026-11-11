@@ -1,14 +1,13 @@
-//! Geführte Einrichtung: Jellyfin, AniList und Sync in drei Schritten.
+//! Guided setup: Jellyfin, AniList and sync in three steps.
 
 use iced::widget::{Column, column, container, row, text};
-use iced::{Center, Element, Fill, Task};
-use musubi_core::{AuthStatus, Config, Core, oauth};
+use iced::{Center, Element, Task};
+use musubi_core::{AuthStatus, Config, Core};
 use secrecy::SecretString;
 
+use crate::anilist_login::{self, Outcome};
 use crate::app::{App, Message};
 use crate::{theme, ui};
-
-const DEVELOPER_URL: &str = "https://anilist.co/settings/developer";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Step {
@@ -33,14 +32,12 @@ pub struct State {
     user: String,
     password: String,
     api_key: String,
-    client_id: String,
-    token: String,
-    redirect: String,
+    anilist: anilist_login::State,
     auto_sync: bool,
     message: Option<(String, bool)>,
 }
 
-/// Zugangsdaten einer Jellyfin-Anmeldung. Ein API-Key hat Vorrang vor dem Passwort.
+/// Credentials of a Jellyfin login. An API key takes precedence over the password.
 pub struct JellyfinLogin {
     pub url: String,
     pub user: String,
@@ -59,11 +56,6 @@ impl JellyfinLogin {
                 .await
         }
     }
-}
-
-pub async fn login_anilist_browser(core: Core, client_id: String) -> musubi_core::Result<String> {
-    core.update_config(|c| c.anilist.client_id = Some(client_id))?;
-    Ok(core.login_anilist_loopback().await?.name)
 }
 
 pub fn jellyfin_status(auth: &AuthStatus) -> String {
@@ -93,9 +85,7 @@ impl State {
             user: auth.jellyfin_user.clone().unwrap_or_default(),
             password: String::new(),
             api_key: String::new(),
-            client_id: config.anilist.client_id.clone().unwrap_or_default(),
-            token: String::new(),
-            redirect: oauth::loopback_redirect(config.anilist.loopback_port),
+            anilist: anilist_login::State::new(config),
             auto_sync: config.sync.auto_sync,
             message: None,
         }
@@ -116,8 +106,6 @@ pub enum Edit {
     User(String),
     Password(String),
     ApiKey(String),
-    ClientId(String),
-    Token(String),
     AutoSync(bool),
 }
 
@@ -125,9 +113,7 @@ pub enum Edit {
 pub enum Msg {
     Edit(Edit),
     LoginJellyfin,
-    OpenDeveloperPage,
-    LoginAniListBrowser,
-    LoginAniListToken,
+    AniList(anilist_login::Msg),
     LoggedIn(Result<String, String>),
     Back,
     Next,
@@ -193,8 +179,6 @@ pub fn update(app: &mut App, msg: Msg) -> Task<Message> {
             Edit::User(v) => state.user = v,
             Edit::Password(v) => state.password = v,
             Edit::ApiKey(v) => state.api_key = v,
-            Edit::ClientId(v) => state.client_id = v,
-            Edit::Token(v) => state.token = v,
             Edit::AutoSync(v) => state.auto_sync = v,
         },
         Msg::LoginJellyfin => {
@@ -211,27 +195,26 @@ pub fn update(app: &mut App, msg: Msg) -> Task<Message> {
             };
             return ui::perform(credentials.run(core), logged_in);
         }
-        Msg::OpenDeveloperPage => {
-            if open::that_detached(DEVELOPER_URL).is_err() {
-                state.error(format!("Could not open a browser, visit {DEVELOPER_URL}"));
-            }
-        }
-        Msg::LoginAniListBrowser => {
-            let id = state.client_id.trim().to_owned();
-            if id.is_empty() {
-                state.error("Enter the client ID of your AniList app.");
-                return Task::none();
-            }
-            state.info("Waiting for the browser…");
-            return ui::perform(login_anilist_browser(core, id), logged_in);
-        }
-        Msg::LoginAniListToken => {
-            state.info("Checking the token…");
-            let token = std::mem::take(&mut state.token);
-            return ui::perform(
-                async move { Ok(core.login_anilist_pin(&token).await?.name) },
-                logged_in,
+        Msg::AniList(msg) => {
+            let starting = matches!(
+                msg,
+                anilist_login::Msg::Start | anilist_login::Msg::UseToken
             );
+            let (task, outcome) = anilist_login::update(&mut state.anilist, &core, msg);
+            let task = task.map(|m| Message::Setup(Msg::AniList(m)));
+            return match outcome {
+                Outcome::Nothing => {
+                    if starting {
+                        state.message = None;
+                    }
+                    task
+                }
+                Outcome::LoggedIn(name) => Task::batch([task, Task::done(logged_in(Ok(name)))]),
+                Outcome::Failed(error) => {
+                    state.error(error);
+                    task
+                }
+            };
         }
         Msg::LoggedIn(Err(error)) => state.error(error),
         Msg::Back => {
@@ -300,36 +283,9 @@ fn jellyfin_step<'a>(state: &'a State, auth: &AuthStatus) -> Column<'a, Msg> {
 }
 
 fn anilist_step<'a>(state: &'a State, auth: &AuthStatus) -> Column<'a, Msg> {
-    let edit = |wrap: fn(String) -> Edit| move |v: String| Msg::Edit(wrap(v));
     column![
-        ui::muted("Musubi has no built-in AniList app. Create your own once; the client secret is not needed."),
         status(auth.anilist_logged_in, anilist_status(auth), theme::TRACK),
-        row![ui::secondary(
-            "Open the AniList developer page",
-            Msg::OpenDeveloperPage
-        )],
-        column![
-            ui::label("Redirect URL for that app"),
-            container(
-                text(&state.redirect)
-                    .size(theme::T_SMALL)
-                    .color(theme::MUTED)
-            )
-            .padding([9, 10])
-            .width(Fill)
-            .style(theme::inset),
-        ]
-        .spacing(6),
-        ui::field("Client ID", &state.client_id, edit(Edit::ClientId)),
-        row![ui::primary("Log in with browser", Msg::LoginAniListBrowser)],
-        ui::divider(),
-        ui::secret_field(
-            "Token or redirect URL, if you log in without the browser flow",
-            &state.token,
-            edit(Edit::Token),
-            Some(Msg::LoginAniListToken)
-        ),
-        row![ui::secondary("Use pasted token", Msg::LoginAniListToken)],
+        anilist_login::view(&state.anilist, auth.anilist_logged_in).map(Msg::AniList),
     ]
     .spacing(theme::S3)
 }

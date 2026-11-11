@@ -1,8 +1,9 @@
-//! AniList-Login über den Implicit Grant.
+//! AniList login through the implicit grant.
 //!
-//! Der Implicit Grant braucht nur die `client_id`, also kein Secret, das eine Desktop-App ohnehin
-//! nicht schützen könnte. AniList liefert das Token im URL-Fragment. Das erreicht keinen Server,
-//! deshalb liest eine kleine lokale Seite es aus und schickt es an den Loopback-Server.
+//! The implicit grant only needs the `client_id`, so no secret that a desktop app could not
+//! protect anyway. The user approves the app in the browser and AniList issues a personal
+//! token in the URL fragment. The fragment reaches no server, so a small local page reads
+//! it and posts it to the loopback server.
 
 use std::time::Duration;
 
@@ -17,6 +18,18 @@ use tokio::time::timeout;
 use crate::{Error, Result};
 
 const MAX_REQUEST: usize = 16 * 1024;
+
+/// Loopback port in the redirect URL registered for the built-in AniList app.
+pub const BUILTIN_LOOPBACK_PORT: u16 = 47823;
+
+/// Client ID of the AniList app that ships with Musubi, baked in at build time from
+/// `MUSUBI_ANILIST_CLIENT_ID`. With it, logging in takes nothing but the browser. A build
+/// without it asks for the client ID of the user's own app.
+pub fn builtin_client_id() -> Option<&'static str> {
+    option_env!("MUSUBI_ANILIST_CLIENT_ID")
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+}
 
 pub fn authorize_url(client_id: &str) -> String {
     let mut url =

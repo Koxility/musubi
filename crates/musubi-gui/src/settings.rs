@@ -3,8 +3,8 @@
 use iced::widget::{column, container, row, slider, svg, text};
 use iced::{Center, Element, Fill, Task};
 use musubi_core::Config;
-use musubi_core::oauth;
 
+use crate::anilist_login::{self, Outcome};
 use crate::app::{App, COMMIT, Message, VERSION};
 use crate::{setup, theme, ui};
 
@@ -14,9 +14,7 @@ pub struct State {
     user: String,
     password: String,
     api_key: String,
-    client_id: String,
-    token: String,
-    redirect: String,
+    anilist: anilist_login::State,
     auto_sync: bool,
     threshold: f64,
     autoplay: bool,
@@ -29,14 +27,12 @@ impl State {
         state
     }
 
-    /// Übernimmt die Konfiguration. Nicht gespeicherte Passwörter bleiben nicht erhalten.
+    /// Takes over the config. Passwords that were not saved are not kept.
     pub fn reload(&mut self, config: &Config) {
         self.url = config.jellyfin.url.clone().unwrap_or_default();
         self.password.clear();
         self.api_key.clear();
-        self.token.clear();
-        self.client_id = config.anilist.client_id.clone().unwrap_or_default();
-        self.redirect = oauth::loopback_redirect(config.anilist.loopback_port);
+        self.anilist.reload(config);
         self.auto_sync = config.sync.auto_sync;
         self.threshold = config.sync.watched_threshold * 100.0;
         self.autoplay = config.player.autoplay_next;
@@ -46,8 +42,7 @@ impl State {
         config.sync.auto_sync = self.auto_sync;
         config.sync.watched_threshold = self.threshold / 100.0;
         config.player.autoplay_next = self.autoplay;
-        let client_id = self.client_id.trim().to_owned();
-        config.anilist.client_id = (!client_id.is_empty()).then_some(client_id);
+        config.anilist.client_id = self.anilist.own_client_id();
     }
 }
 
@@ -57,8 +52,6 @@ pub enum Edit {
     User(String),
     Password(String),
     ApiKey(String),
-    ClientId(String),
-    Token(String),
     AutoSync(bool),
     Threshold(f64),
     Autoplay(bool),
@@ -68,8 +61,7 @@ pub enum Edit {
 pub enum Msg {
     Edit(Edit),
     LoginJellyfin,
-    LoginAniListBrowser,
-    LoginAniListToken,
+    AniList(anilist_login::Msg),
     LogoutJellyfin,
     LogoutAniList,
     LoggedIn(Result<String, String>),
@@ -91,8 +83,6 @@ pub fn update(app: &mut App, msg: Msg) -> Task<Message> {
                 Edit::User(v) => s.user = v,
                 Edit::Password(v) => s.password = v,
                 Edit::ApiKey(v) => s.api_key = v,
-                Edit::ClientId(v) => s.client_id = v,
-                Edit::Token(v) => s.token = v,
                 Edit::AutoSync(v) => s.auto_sync = v,
                 Edit::Threshold(v) => s.threshold = v,
                 Edit::Autoplay(v) => s.autoplay = v,
@@ -112,21 +102,17 @@ pub fn update(app: &mut App, msg: Msg) -> Task<Message> {
             };
             return ui::perform(credentials.run(core), logged_in);
         }
-        Msg::LoginAniListBrowser => {
-            let id = app.settings.client_id.trim().to_owned();
-            if id.is_empty() {
-                app.toast("Enter the client ID of your AniList app.", false);
-                return Task::none();
-            }
-            app.toast("Waiting for the browser…", true);
-            return ui::perform(setup::login_anilist_browser(core, id), logged_in);
-        }
-        Msg::LoginAniListToken => {
-            let token = std::mem::take(&mut app.settings.token);
-            return ui::perform(
-                async move { Ok(core.login_anilist_pin(&token).await?.name) },
-                logged_in,
-            );
+        Msg::AniList(msg) => {
+            let (task, outcome) = anilist_login::update(&mut app.settings.anilist, &core, msg);
+            let task = task.map(|m| Message::Settings(Msg::AniList(m)));
+            return match outcome {
+                Outcome::Nothing => task,
+                Outcome::LoggedIn(name) => Task::batch([task, Task::done(logged_in(Ok(name)))]),
+                Outcome::Failed(error) => {
+                    app.toast(error, false);
+                    task
+                }
+            };
         }
         Msg::LogoutJellyfin => {
             return ui::perform(
@@ -266,35 +252,8 @@ pub fn view(app: &App) -> Element<'_, Message> {
             setup::anilist_status(&app.auth),
             theme::TRACK
         ),
-        ui::muted("Create an app at anilist.co/settings/developer and enter its client ID."),
-        row![
-            half(ui::field("Client ID", &s.client_id, edit(Edit::ClientId))),
-            half(
-                column![
-                    ui::label("Redirect URL for that app"),
-                    container(text(&s.redirect).size(theme::T_SMALL).color(theme::MUTED))
-                        .padding([9, 10])
-                        .width(Fill)
-                        .style(theme::inset),
-                ]
-                .spacing(6)
-                .into()
-            ),
-        ]
-        .spacing(theme::S3),
-        ui::secret_field(
-            "Token or redirect URL, if you log in without the browser flow",
-            &s.token,
-            edit(Edit::Token),
-            None
-        ),
-        row![
-            ui::primary("Log in with browser", Msg::LoginAniListBrowser),
-            ui::secondary("Use pasted token", Msg::LoginAniListToken),
-            ui::quiet("Log out", Msg::LogoutAniList),
-        ]
-        .spacing(theme::S2)
-        .align_y(Center),
+        anilist_login::view(&s.anilist, app.auth.anilist_logged_in).map(Msg::AniList),
+        row![ui::quiet("Log out", Msg::LogoutAniList)],
     ]
     .spacing(theme::S3);
     let preferences = column![

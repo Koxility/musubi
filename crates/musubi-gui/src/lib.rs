@@ -4,6 +4,7 @@
 //! Ansicht mit, [`app`] verbindet sie mit dem Kern.
 
 mod anilist;
+mod anilist_login;
 mod app;
 mod home;
 mod icons;

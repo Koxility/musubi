@@ -99,7 +99,8 @@ async fn login_jellyfin(core: &Core, api_key: bool) -> Result<()> {
 }
 
 async fn login_anilist(core: &Core, pin: bool) -> Result<()> {
-    if core.config().anilist.client_id.is_none() {
+    // Only a build without the built-in AniList app needs the user's own client ID.
+    if !core.anilist_login_ready() {
         let port = core.config().anilist.loopback_port;
         println!("Create an app at https://anilist.co/settings/developer");
         println!("Redirect URL: {}", oauth::loopback_redirect(port));

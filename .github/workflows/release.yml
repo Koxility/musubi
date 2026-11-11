@@ -39,7 +39,11 @@ jobs:
       - name: Test
         run: cargo test --workspace --locked
 
+      # The client ID of Musubi's AniList API client. It is not a secret; without it the
+      # build asks every user for the ID of their own client.
       - name: Build
+        env:
+          MUSUBI_ANILIST_CLIENT_ID: ${{ vars.ANILIST_CLIENT_ID }}
         run: cargo build --release --locked -p musubi
 
       - name: Package

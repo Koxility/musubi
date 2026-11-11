@@ -32,6 +32,16 @@ install -Dm644 packaging/musubi.desktop ~/.local/share/applications/musubi.deskt
 install -Dm644 packaging/musubi.svg ~/.local/share/icons/hicolor/scalable/apps/musubi.svg
 ```
 
+### Built-in AniList client
+
+The AniList login needs the client ID of an AniList API client. A client ID is not a secret. Set `MUSUBI_ANILIST_CLIENT_ID` when building to bake one in, so users only have to approve Musubi in their browser:
+
+```bash
+MUSUBI_ANILIST_CLIENT_ID=12345 cargo install --locked --path crates/musubi
+```
+
+The client must be registered at <https://anilist.co/settings/developer> with the redirect URL `http://127.0.0.1:47823/callback`. A build without the variable asks every user for the client ID of their own client. The release workflow reads the ID from the repository variable `ANILIST_CLIENT_ID`.
+
 The bottom of the sidebar and of the Settings page show the version and git commit of the running build, e.g. `v0.1.0 · 218b921`. `crates/musubi-gui/build.rs` embeds the commit. If the commit doesn't match your checkout, your launcher starts an older binary.
 
 ## Checks

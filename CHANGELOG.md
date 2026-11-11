@@ -4,6 +4,10 @@ All notable changes to Musubi are documented here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Added
+
+- **One-click AniList login.** Builds with the built-in AniList client only need *Log in with AniList*: approve Musubi in the browser and AniList issues your personal token. A waiting login can be cancelled. Your own API client and a pasted token remain available under the advanced options.
+
 ### Fixed
 
 - The Profile score distribution showed every score in the column for 10 and nothing else for users who score out of 10, 5 or 3. AniList reports these scores on the user's own scale; they are now converted.
