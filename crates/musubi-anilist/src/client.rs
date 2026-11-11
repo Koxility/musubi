@@ -24,6 +24,9 @@ pub struct Relation {
     pub media: Media,
 }
 
+/// The most works AniList returns per page.
+pub const MEDIA_PAGE: usize = 50;
+
 #[derive(Clone)]
 pub struct Client {
     http: reqwest::Client,
@@ -173,6 +176,17 @@ impl Client {
             .graphql(format!("{MEDIA_BY_ID}{MEDIA_FIELDS}"), json!({ "id": id }))
             .await?;
         Ok(data.media.into())
+    }
+
+    /// Up to 50 works by ID in one request. Unknown IDs are simply missing from the result.
+    pub async fn media_many(&self, ids: &[i64]) -> Result<Vec<Media>> {
+        let data: PageData = self
+            .graphql(
+                format!("{MEDIA_BY_IDS}{MEDIA_FIELDS}"),
+                json!({ "ids": ids, "perPage": MEDIA_PAGE }),
+            )
+            .await?;
+        Ok(data.page.media.into_iter().map(Into::into).collect())
     }
 
     pub async fn media_by_mal(&self, id_mal: i64, kind: MediaKind) -> Result<Media> {

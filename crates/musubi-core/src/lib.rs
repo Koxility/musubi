@@ -30,5 +30,5 @@ pub use musubi_player::{
 };
 pub use musubi_store::{
     AniListLoginFlow, Config, OutboxItem, OutboxOp, Paths, ReviewCandidate, ReviewItem,
-    SyncLogEntry,
+    SyncLogEntry, ViewConfig, ViewMode, ViewSize,
 };

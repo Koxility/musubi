@@ -48,15 +48,18 @@ pub const R_MD: f32 = 6.0;
 pub const R_LG: f32 = 10.0;
 pub const PILL: f32 = 999.0;
 
-// Schriftgrößen.
+// Font sizes.
 pub const T_CAPTION: f32 = 11.0;
 pub const T_LABEL: f32 = 12.0;
 pub const T_SMALL: f32 = 13.0;
 pub const T_BODY: f32 = 15.0;
+/// Titles of the large cards on Home.
+pub const T_CARD: f32 = 16.0;
 pub const T_TITLE: f32 = 18.0;
 pub const T_SECTION: f32 = 22.0;
 pub const T_PAGE: f32 = 28.0;
-pub const T_DISPLAY: f32 = 40.0;
+/// Title on the Home hero.
+pub const T_HERO: f32 = 52.0;
 
 /// Dieselbe Farbe mit anderer Deckkraft.
 pub const fn alpha(color: Color, a: f32) -> Color {

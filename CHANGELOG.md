@@ -4,6 +4,27 @@ All notable changes to Musubi are documented here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-11
+
+### Added
+
+- **View options** in Library and AniList: grid or list, each in three sizes, switched at the top right and remembered per page. The Library gains a list view with year, genres, AniList status and episodes left.
+- **One-click AniList login.** Musubi ships with its own AniList client, so *Log in with AniList* is all it takes: approve Musubi in the browser and AniList issues your personal token. A waiting login can be cancelled. Your own API client and a pasted token remain available under the advanced options.
+- **Add to AniList from a title's page.** A matched title that is not on your lists yet shows a list picker and *Add to AniList* right in its AniList strip.
+
+### Changed
+
+- **English titles.** AniList titles show in English where AniList has one, otherwise in Romaji, then in the native script. Titles stored with existing matches are updated once on the next start.
+- One logo everywhere: the sidebar, the About line and the window icon use the same mark as the launcher entry.
+- **Home is larger.** The hero for what to continue follows the window and shows the whole backdrop instead of a cropped strip; posters, cards and text in the rows are bigger. Rows also scroll by dragging the thin bar below the cards.
+- **Airing on the AniList overview** uses the same cover cards as "Anime in progress", with the countdown next to the episode count.
+- The `+1` button is a solid, labelled pill that is always visible in the top-right corner of a cover and in list rows.
+
+### Fixed
+
+- The Profile score distribution showed every score in the column for 10 and nothing else for users who score out of 10, 5 or 3. AniList reports these scores on the user's own scale; they are now converted.
+- Backdrops no longer spill over the content below them with the software renderer.
+
 ## [0.2.0] - 2026-11-11
 
 ### Added
@@ -62,6 +83,7 @@ First release.
 - Playback needs GStreamer with `gst-plugins-base`, `-good`, `-bad` and `gst-libav`.
 - You need your own AniList client ID; see the README.
 
+[0.3.0]: https://github.com/Koxility/musubi/releases/tag/v0.3.0
 [0.2.0]: https://github.com/Koxility/musubi/releases/tag/v0.2.0
 [0.1.1]: https://github.com/Koxility/musubi/releases/tag/v0.1.1
 [0.1.0]: https://github.com/Koxility/musubi/releases/tag/v0.1.0

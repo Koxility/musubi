@@ -8,6 +8,8 @@ use iced::widget::{
 };
 use iced::{Center, Color, ContentFit, Element, Fill, FillPortion, Length, Padding, Task};
 
+use musubi_core::{ViewConfig, ViewMode, ViewSize};
+
 use crate::icons::Icon;
 use crate::images::{ImageCache, ImageKey};
 use crate::theme::{self, S1, S2, S3, S4, S5, S6};
@@ -88,6 +90,25 @@ pub fn icon_label<'a, M: Clone + 'a>(
     .into()
 }
 
+/// The main action on the Home hero: a large red pill.
+pub fn hero_action<'a, M: Clone + 'a>(glyph: Icon, label: &'a str, message: M) -> Element<'a, M> {
+    button(
+        row![
+            icon(glyph, 22.0, theme::INK),
+            text(label)
+                .size(theme::T_TITLE)
+                .font(SEMIBOLD)
+                .color(theme::INK)
+        ]
+        .spacing(S2)
+        .align_y(Center),
+    )
+    .padding([13, 30])
+    .style(theme::watch_pill)
+    .on_press(message)
+    .into()
+}
+
 /// Kleiner Button mit Icon und Beschriftung für Werkzeugleisten.
 pub fn tool<'a, M: Clone + 'a>(
     glyph: Icon,
@@ -108,6 +129,95 @@ pub fn tool<'a, M: Clone + 'a>(
     .style(style)
     .on_press_maybe(message)
     .into()
+}
+
+/// The "+1" action of a list entry. Always solid and labelled, so it is easy to spot and
+/// to hit on top of a cover. Without a message it is visibly disabled.
+pub fn plus_one<'a, M: Clone + 'a>(message: Option<M>, tip: &'a str) -> Element<'a, M> {
+    let color = if message.is_some() {
+        theme::INK
+    } else {
+        theme::FAINT
+    };
+    let content = button(
+        row![
+            icon(Icon::Plus, 14.0, color),
+            text("1").size(theme::T_BODY).font(SEMIBOLD).color(color)
+        ]
+        .spacing(2)
+        .align_y(Center),
+    )
+    .padding([4.0, 11.0])
+    .style(theme::count_up)
+    .on_press_maybe(message);
+    with_tip(content, tip)
+}
+
+/// Switch between grid and list and between the size presets. `modes` is false where a
+/// page only has one layout.
+pub fn view_controls<'a, M: Clone + 'a>(
+    view: ViewConfig,
+    modes: bool,
+    on_change: impl Fn(ViewConfig) -> M + 'a,
+) -> Element<'a, M> {
+    let frame = |options: Vec<Element<'a, M>>| {
+        container(row(options).spacing(2))
+            .padding(3)
+            .style(theme::segmented)
+    };
+    let segment = |content: Element<'a, M>, active: bool, message: M, tip: &'a str| {
+        with_tip(
+            button(center(content).width(30).height(26))
+                .padding(0)
+                .style(theme::segment(active))
+                .on_press(message),
+            tip,
+        )
+    };
+    let mut controls = Row::new().spacing(S2).align_y(Center);
+    if modes {
+        let mode = |glyph, value: ViewMode, tip| {
+            let active = view.mode == value;
+            let color = if active { theme::PAPER } else { theme::MUTED };
+            segment(
+                icon(glyph, 16.0, color),
+                active,
+                on_change(ViewConfig {
+                    mode: value,
+                    ..view
+                }),
+                tip,
+            )
+        };
+        controls = controls.push(frame(vec![
+            mode(Icon::Grid, ViewMode::Grid, "Grid view"),
+            mode(Icon::List, ViewMode::List, "List view"),
+        ]));
+    }
+    let sizes = ViewSize::ALL
+        .into_iter()
+        .map(|value| {
+            let (letter, tip) = match value {
+                ViewSize::Small => ("S", "Small"),
+                ViewSize::Medium => ("M", "Medium"),
+                ViewSize::Large => ("L", "Large"),
+            };
+            let active = view.size == value;
+            segment(
+                text(letter)
+                    .size(theme::T_LABEL)
+                    .font(if active { SEMIBOLD } else { theme::MEDIUM })
+                    .into(),
+                active,
+                on_change(ViewConfig {
+                    size: value,
+                    ..view
+                }),
+                tip,
+            )
+        })
+        .collect();
+    controls.push(frame(sizes)).into()
 }
 
 // Texthilfen ----------------------------------------------------------------------------
@@ -384,7 +494,7 @@ pub fn toggle<'a, M: 'a>(
 
 // Bilder und Fortschritt ----------------------------------------------------------------
 
-/// Bild mit Platzhalter, das beim ersten Sichtbarwerden nachgeladen wird.
+/// Picture with a placeholder, loaded when it first scrolls into view.
 pub fn picture<'a, M: Clone + 'a>(
     images: &'a ImageCache,
     key: Option<ImageKey>,
@@ -393,31 +503,40 @@ pub fn picture<'a, M: Clone + 'a>(
     want: fn(ImageKey) -> M,
 ) -> Element<'a, M> {
     let (width, height) = (width.into(), height.into());
-    let Some(key) = key else {
-        return container(Space::new())
+    let placeholder = || -> Element<'a, M> {
+        container(Space::new())
             .width(width)
             .height(height)
             .style(theme::placeholder)
-            .into();
+            .into()
+    };
+    let Some(key) = key else {
+        return placeholder();
     };
     let content: Element<'a, M> = match images.get(&key) {
-        // Der Container beschneidet: Ein Bild mit `Fill` ragt sonst über seine Höhe hinaus.
-        Some(handle) => container(
-            image(handle.clone())
+        Some(handle) => {
+            let picture = image(handle.clone())
                 .width(width)
                 .height(height)
                 .content_fit(ContentFit::Cover)
-                .border_radius(theme::R_SM),
-        )
-        .width(width)
-        .height(height)
-        .clip(true)
-        .into(),
-        None => container(Space::new())
-            .width(width)
-            .height(height)
-            .style(theme::placeholder)
-            .into(),
+                .border_radius(theme::R_SM);
+            if width == Length::Fill {
+                // A picture that fills the width is cropped to its frame, often by a lot.
+                // The software renderer ignores the image's own clip, so the part outside
+                // the frame would cover what follows. The upper layer of a clipping stack
+                // is a real clip in every renderer.
+                stack![Space::new().width(width).height(height), picture]
+                    .clip(true)
+                    .into()
+            } else {
+                container(picture)
+                    .width(width)
+                    .height(height)
+                    .clip(true)
+                    .into()
+            }
+        }
+        None => placeholder(),
     };
     sensor(content)
         .key(key.clone())
@@ -489,8 +608,9 @@ pub fn section<'a, M: 'a>(
     column![title, content.into()].spacing(S3).into()
 }
 
-/// Waagerechte Leiste ohne sichtbaren Scrollbalken. Die Pfeile im Kopf blättern, weil ein
-/// Mausrad nur senkrecht scrollt.
+/// Horizontal row of cards. It scrolls with a touchpad swipe, Shift and the mouse wheel,
+/// the thin bar below the cards, and the arrows in its header, because a plain mouse wheel
+/// only scrolls the page.
 pub fn shelf<'a, M: Clone + 'a>(
     title: &'a str,
     id: &'static str,
@@ -500,43 +620,58 @@ pub fn shelf<'a, M: Clone + 'a>(
     on_scroll: fn(&'static str, f32) -> M,
 ) -> Element<'a, M> {
     let count = items.len();
-    // Karten haben einen eigenen Rand; ihr Bild soll trotzdem bündig unter der Überschrift stehen.
+    // Cards have their own inset; their picture should still line up with the heading.
     let cards = Padding {
         left: padding.left - card_inset,
+        bottom: S2,
         ..padding
     };
     let arrow = |glyph, label, step: f32| {
         icon_button(
             glyph,
-            15.0,
-            theme::MUTED,
+            17.0,
+            theme::PAPER,
             Some(on_scroll(id, step)),
             label,
-            theme::quiet,
+            theme::ghost_button,
         )
     };
+    let heading = row![
+        text(title)
+            .size(theme::T_SECTION)
+            .font(theme::DISPLAY)
+            .color(theme::PAPER),
+        text(count.to_string())
+            .size(theme::T_BODY)
+            .font(theme::MEDIUM)
+            .color(theme::FAINT),
+    ]
+    .spacing(S2)
+    .align_y(iced::Bottom);
+    let bar = Scrollbar::new().width(4).scroller_width(4).margin(0);
     column![
         container(
             row![
-                heading_count(title, count),
+                heading,
                 spacer(),
                 arrow(Icon::ChevronLeft, "Scroll back", -SHELF_STEP),
                 arrow(Icon::ChevronRight, "Scroll on", SHELF_STEP),
             ]
-            .spacing(S1)
+            .spacing(S2)
             .align_y(Center)
         )
         .padding(padding),
-        scrollable(container(row(items).spacing(S2)).padding(cards))
+        scrollable(container(row(items).spacing(S3)).padding(cards))
             .id(id)
-            .direction(Direction::Horizontal(Scrollbar::hidden()))
+            .direction(Direction::Horizontal(bar))
+            .style(theme::scroll)
             .width(Fill),
     ]
-    .spacing(S1)
+    .spacing(S2)
     .into()
 }
 
-/// Blättert ein Regal um `step` Pixel weiter.
+/// Scrolls a shelf by `step` pixels.
 pub fn scroll_shelf<M: Send + 'static>(id: &'static str, step: f32) -> Task<M> {
     iced::widget::operation::scroll_by(
         id,
@@ -544,8 +679,8 @@ pub fn scroll_shelf<M: Send + 'static>(id: &'static str, step: f32) -> Task<M> {
     )
 }
 
-/// Schrittweite der Pfeile eines Regals.
-const SHELF_STEP: f32 = 640.0;
+/// How far the arrows of a shelf scroll.
+const SHELF_STEP: f32 = 820.0;
 
 /// Fläche für eine Gruppe zusammengehöriger Zeilen.
 pub fn card<'a, M: 'a>(content: impl Into<Element<'a, M>>) -> Element<'a, M> {

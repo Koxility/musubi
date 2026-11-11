@@ -250,12 +250,13 @@ pub struct ViewerData {
     pub viewer: ViewerDto,
 }
 
-/// Eine Gruppe der Statistik. Je nach Abfrage steht der Schlüssel in einem anderen Feld.
+/// One group of the statistics. Depending on the query, the key sits in a different field.
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct StatDto {
     pub status: Option<ListStatus>,
-    pub score: Option<u32>,
+    /// A float, so that a fractional score never fails the whole profile.
+    pub score: Option<f64>,
     pub format: Option<String>,
     pub genre: Option<String>,
     pub release_year: Option<i32>,
@@ -271,7 +272,7 @@ impl From<StatDto> for StatBucket {
             .genre
             .or(d.format)
             .or(d.release_year.map(|y| y.to_string()))
-            .or(d.score.map(|s| s.to_string()))
+            .or(d.score.map(|s| (s.round() as u32).to_string()))
             .unwrap_or_default();
         Self {
             key,
@@ -299,8 +300,36 @@ pub struct KindStatsDto {
     pub release_years: Option<Vec<Option<StatDto>>>,
 }
 
-impl From<KindStatsDto> for KindStats {
-    fn from(d: KindStatsDto) -> Self {
+/// Converts the score buckets to `scoreRaw` keys.
+///
+/// AniList reports them in the user's own scale: 1 to 10 for `POINT_10`, 1 to 5 for stars
+/// and so on. Read as 0 to 100, everything but a 10 would vanish from the chart.
+fn score_buckets(list: Option<Vec<Option<StatDto>>>, format: ScoreFormat) -> Vec<StatBucket> {
+    let list: Vec<StatDto> = list.unwrap_or_default().into_iter().flatten().collect();
+    let highest = list.iter().filter_map(|s| s.score).fold(0.0, f64::max);
+    // A value above the format's range can only be a raw score already.
+    let already_raw = highest > f64::from(format.max_points());
+    list.into_iter()
+        .map(|stat| {
+            let score = stat.score.unwrap_or(0.0).max(0.0);
+            let raw = if already_raw || format == ScoreFormat::Point100 {
+                score.round() as u32
+            } else if format == ScoreFormat::Point10Decimal {
+                (score * 10.0).round() as u32
+            } else {
+                format.points_to_raw(score.round() as u32)
+            };
+            StatBucket {
+                key: raw.min(100).to_string(),
+                ..StatBucket::from(stat)
+            }
+        })
+        .collect()
+}
+
+impl KindStatsDto {
+    fn into_stats(self, format: ScoreFormat) -> KindStats {
+        let d = self;
         let buckets = |list: Option<Vec<Option<StatDto>>>| -> Vec<StatBucket> {
             list.unwrap_or_default()
                 .into_iter()
@@ -320,7 +349,7 @@ impl From<KindStatsDto> for KindStats {
                 })
             })
             .collect();
-        Self {
+        KindStats {
             count: d.count.unwrap_or(0),
             mean_score: d.mean_score.unwrap_or(0.0),
             standard_deviation: d.standard_deviation.unwrap_or(0.0),
@@ -329,7 +358,7 @@ impl From<KindStatsDto> for KindStats {
             chapters_read: d.chapters_read.unwrap_or(0),
             volumes_read: d.volumes_read.unwrap_or(0),
             statuses,
-            scores: buckets(d.scores),
+            scores: score_buckets(d.scores, format),
             formats: buckets(d.formats),
             genres: buckets(d.genres),
             release_years: buckets(d.release_years),
@@ -357,19 +386,24 @@ pub struct ProfileDto {
     pub site_url: Option<String>,
     pub banner_image: Option<String>,
     pub avatar: Option<AvatarDto>,
+    pub media_list_options: Option<ListOptionsDto>,
     pub statistics: Option<StatisticsDto>,
 }
 
 impl From<ProfileDto> for Profile {
     fn from(d: ProfileDto) -> Self {
         let statistics = d.statistics.unwrap_or_default();
+        let format = d
+            .media_list_options
+            .and_then(|o| o.score_format)
+            .unwrap_or_default();
         Self {
             name: d.name,
             avatar_url: d.avatar.and_then(|a| a.large),
             banner_url: d.banner_image,
             site_url: d.site_url,
-            anime: statistics.anime.unwrap_or_default().into(),
-            manga: statistics.manga.unwrap_or_default().into(),
+            anime: statistics.anime.unwrap_or_default().into_stats(format),
+            manga: statistics.manga.unwrap_or_default().into_stats(format),
             fetched_at: 0,
         }
     }
@@ -465,4 +499,54 @@ pub struct Ignored {}
 pub struct UpdateUserData {
     #[serde(rename = "UpdateUser")]
     pub _user: Ignored,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn stats(format: ScoreFormat, scores: &[(f64, u32)]) -> KindStats {
+        let scores = scores
+            .iter()
+            .map(|(score, count)| {
+                Some(StatDto {
+                    score: Some(*score),
+                    count: Some(*count),
+                    ..StatDto::default()
+                })
+            })
+            .collect();
+        KindStatsDto {
+            scores: Some(scores),
+            ..KindStatsDto::default()
+        }
+        .into_stats(format)
+    }
+
+    #[test]
+    fn score_buckets_are_read_in_the_users_scale() {
+        let ten = stats(ScoreFormat::Point10, &[(10.0, 33), (7.0, 12), (1.0, 2)]).score_counts();
+        assert_eq!(ten[9], (100, 33));
+        assert_eq!(ten[6], (70, 12));
+        assert_eq!(ten[0], (10, 2));
+
+        let stars = stats(ScoreFormat::Point5, &[(5.0, 4), (3.0, 6)]).score_counts();
+        assert_eq!(stars[9], (100, 4));
+        assert_eq!(stars[5], (60, 6));
+
+        let decimal = stats(ScoreFormat::Point10Decimal, &[(8.5, 3), (9.0, 1)]).score_counts();
+        assert_eq!(decimal[7], (80, 3));
+        assert_eq!(decimal[8], (90, 1));
+    }
+
+    #[test]
+    fn raw_score_buckets_stay_as_they_are() {
+        let raw = stats(ScoreFormat::Point100, &[(85.0, 2), (70.0, 5)]).score_counts();
+        assert_eq!(raw[7], (80, 2));
+        assert_eq!(raw[6], (70, 5));
+        // A scale above the format's range can only be raw already.
+        let wide = stats(ScoreFormat::Point10, &[(80.0, 2), (10.0, 1)]).score_counts();
+        assert_eq!(wide[7], (80, 2));
+        assert_eq!(wide[0], (10, 1));
+    }
 }

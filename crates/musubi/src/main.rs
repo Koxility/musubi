@@ -3,11 +3,11 @@
 use std::io::{BufRead, Write};
 use std::sync::Arc;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use musubi_core::domain::MediaKind;
 use musubi_core::{
-    AniListLoginFlow, Core, CoreOptions, Paths, PlayerBackend, PlayerCommand, SyncDirection, oauth,
+    AniListLoginFlow, Core, CoreOptions, Paths, PlayerBackend, PlayerCommand, SyncDirection,
 };
 use secrecy::SecretString;
 use tracing_subscriber::EnvFilter;
@@ -99,22 +99,15 @@ async fn login_jellyfin(core: &Core, api_key: bool) -> Result<()> {
 }
 
 async fn login_anilist(core: &Core, pin: bool) -> Result<()> {
-    if core.config().anilist.client_id.is_none() {
-        let port = core.config().anilist.loopback_port;
-        println!("Create an app at https://anilist.co/settings/developer");
-        println!("Redirect URL: {}", oauth::loopback_redirect(port));
-        println!("For the manual flow use: {}", oauth::PIN_REDIRECT);
-        let id = prompt("Client ID")?;
-        if id.is_empty() {
-            bail!("a client ID is required");
-        }
-        core.update_config(|c| c.anilist.client_id = Some(id))?;
-    }
     let use_pin = pin || core.config().anilist.login_flow == AniListLoginFlow::Pin;
     let viewer = if use_pin {
         println!(
             "Open this page and authorize Musubi:\n{}",
-            core.anilist_authorize_url()?
+            core.anilist_authorize_url()
+        );
+        println!(
+            "Afterwards copy the token, or the whole address of the page the browser lands \
+             on, even if that page does not load."
         );
         let input = prompt_secret("Token or redirect URL")?;
         core.login_anilist_pin(secrecy::ExposeSecret::expose_secret(&input))

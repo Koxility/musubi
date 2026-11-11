@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use iced::keyboard::{self, Key, key::Named};
 use iced::widget::image::Handle;
-use iced::widget::{Space, button, column, container, row, stack, svg, text};
+use iced::widget::{Space, button, column, container, row, stack, text};
 use iced::{Center, Color, Element, Fill, Subscription, Task, Theme};
 use musubi_core::domain::MediaKind;
 use musubi_core::{AuthStatus, Config, Core, CoreEvent, PlayerCommand, Service};
@@ -14,7 +14,7 @@ use tokio::sync::broadcast;
 use crate::icons::Icon;
 use crate::images::{ImageCache, ImageKey};
 use crate::ui;
-use crate::{anilist, home, library, mapping, profile, settings, setup, sync, theme, video};
+use crate::{anilist, home, library, logo, mapping, profile, settings, setup, sync, theme, video};
 
 const TOAST_SECONDS: u64 = 5;
 /// Version dieses Builds.
@@ -250,6 +250,8 @@ impl App {
             config,
             core,
         };
+        app.anilist.view = app.config.ui.anilist;
+        app.library.view = app.config.ui.library;
         if video.is_none() {
             app.toast(
                 "GStreamer is not available, video playback is disabled. See the README.",
@@ -290,6 +292,14 @@ impl App {
 
     pub fn toast(&mut self, text: impl Into<String>, ok: bool) {
         self.toast = Some((text.into(), ok, Instant::now()));
+    }
+
+    /// Changes the config and keeps the GUI's copy in step, e.g. for a view preference.
+    pub fn remember(&mut self, change: impl FnOnce(&mut Config)) {
+        if let Err(error) = self.core.update_config(change) {
+            self.toast(format!("Could not save that setting: {error}"), false);
+        }
+        self.config = self.core.config();
     }
 
     pub fn report(&mut self, result: Result<(), String>) {
@@ -516,11 +526,8 @@ impl App {
     }
 
     fn navigation(&self) -> Element<'_, Message> {
-        static MARK: std::sync::LazyLock<svg::Handle> = std::sync::LazyLock::new(|| {
-            svg::Handle::from_memory(include_bytes!("../assets/mark.svg").as_slice())
-        });
         let brand = row![
-            svg(MARK.clone()).width(41).height(22),
+            logo::mark(38.0),
             text("Musubi")
                 .size(theme::T_TITLE)
                 .font(theme::DISPLAY_BOLD)

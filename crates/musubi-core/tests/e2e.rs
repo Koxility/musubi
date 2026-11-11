@@ -936,13 +936,15 @@ async fn profile_statistics_are_fetched_cached_and_cleared_on_logout() {
                 json!({"Viewer": {
                     "name": "eden", "siteUrl": "https://anilist.co/user/eden",
                     "bannerImage": null, "avatar": {"large": "https://img.example/a.png"},
+                    "mediaListOptions": {"scoreFormat": "POINT_10"},
                     "statistics": {
                         "anime": {
                             "count": 3, "meanScore": 81.5, "standardDeviation": 6.0,
                             "minutesWatched": 2880, "episodesWatched": 120,
                             "statuses": [{"status": "COMPLETED", "count": 2},
                                 {"status": "CURRENT", "count": 1}],
-                            "scores": [{"score": 80, "count": 2}, {"score": 85, "count": 1}],
+                            "scores": [{"score": 8, "count": 3}, {"score": 10, "count": 1},
+                                {"score": 3, "count": 2}],
                             "formats": [{"format": "TV", "count": 3, "meanScore": 81.5,
                                 "minutesWatched": 2880}],
                             "genres": [{"genre": "Drama", "count": 2, "meanScore": 84.0,
@@ -978,7 +980,10 @@ async fn profile_statistics_are_fetched_cached_and_cleared_on_logout() {
     assert_eq!(profile.anime.count, 3);
     assert_eq!(profile.anime.days_watched(), 2.0);
     assert_eq!(profile.anime.status_count(ListStatus::Completed), 2);
+    // AniList reports the buckets on the user's 1 to 10 scale.
     assert_eq!(profile.anime.score_counts()[7], (80, 3));
+    assert_eq!(profile.anime.score_counts()[9], (100, 1));
+    assert_eq!(profile.anime.score_counts()[2], (30, 2));
     assert_eq!(profile.anime.genres[0].key, "Drama");
     assert_eq!(profile.anime.genres.len(), 1);
     assert_eq!(profile.anime.release_years[0].key, "2019");
@@ -991,4 +996,62 @@ async fn profile_statistics_are_fetched_cached_and_cleared_on_logout() {
     // Beim Abmelden verschwindet sie mit den übrigen AniList-Daten.
     core.logout_anilist().await.unwrap();
     assert!(core.cached_profile().await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn matches_show_english_titles_and_can_be_added_to_a_list() {
+    let dir = tempfile::tempdir().unwrap();
+    let anilist = MockServer::start().await;
+    let frieren = json!({
+        "id": 101, "type": "ANIME", "format": "TV", "episodes": 28, "status": "FINISHED",
+        "title": {"romaji": "Sousou no Frieren", "english": "Frieren: Beyond Journey's End",
+            "native": "葬送のフリーレン"}
+    });
+    Mock::given(method("POST"))
+        .respond_with(move |request: &Request| {
+            let body: Value = serde_json::from_slice(&request.body).unwrap();
+            let query = body["query"].as_str().unwrap();
+            let data = if query.contains("SaveMediaListEntry") {
+                json!({"SaveMediaListEntry": {"id": 900, "status": body["variables"]["status"],
+                    "score": 0, "progress": 0, "media": frieren.clone()}})
+            } else if query.contains("Viewer") {
+                json!({"Viewer": {"id": 7, "name": "eden",
+                    "mediaListOptions": {"scoreFormat": "POINT_100"}}})
+            } else if query.contains("id_in") {
+                json!({"Page": {"media": [frieren.clone()]}})
+            } else {
+                json!({"Media": frieren.clone()})
+            };
+            ResponseTemplate::new(200)
+                .insert_header("X-RateLimit-Limit", "90")
+                .set_body_json(json!({"data": data}))
+        })
+        .mount(&anilist)
+        .await;
+    let core = core(dir.path(), &anilist).await;
+    core.login_anilist_pin("tok").await.unwrap();
+
+    // A match stored by an older version carries the Romaji title.
+    let old = Mapping {
+        title: "Sousou no Frieren".into(),
+        ..mapping()
+    };
+    core.set_mappings("s1", vec![old]).await.unwrap();
+    core.refresh_mapping_titles().await.unwrap();
+    let stored = core.mappings_for("s1").await.unwrap();
+    assert_eq!(stored[0].title, "Frieren: Beyond Journey's End");
+
+    // The matched work is not on the list yet and gets added by its ID.
+    assert!(core.entry_for(101).is_none());
+    let title = core
+        .add_media_to_list(101, ListStatus::Planning)
+        .await
+        .unwrap();
+    assert_eq!(title, "Frieren: Beyond Journey's End");
+    let entry = core.entry_for(101).expect("the entry shows at once");
+    assert_eq!(entry.status, ListStatus::Planning);
+    assert_eq!(
+        entry.media.title.preferred(),
+        "Frieren: Beyond Journey's End"
+    );
 }

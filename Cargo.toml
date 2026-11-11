@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.95"
 license = "GPL-3.0-or-later"
@@ -65,6 +65,9 @@ iced = { version = "0.14", features = ["image", "svg", "tokio", "advanced"] }
 iced_video_player = "0.6"
 gstreamer = "0.23"
 gstreamer-app = "0.23"
+
+# Renders the logo for the window icon. iced draws SVGs with the same version.
+resvg = { version = "0.45", default-features = false }
 
 # Tests
 wiremock = "0.6"

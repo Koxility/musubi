@@ -141,7 +141,33 @@ impl ScoreFormat {
         }
     }
 
-    /// Wandelt eine Eingabe im Format des Nutzers in `scoreRaw` um.
+    /// Converts a whole score in the user's format, e.g. `7` of 10 or `4` stars, to
+    /// `scoreRaw`.
+    pub fn points_to_raw(self, points: u32) -> u32 {
+        match self {
+            Self::Point100 => points.min(100),
+            Self::Point10Decimal | Self::Point10 => (points * 10).min(100),
+            Self::Point5 => (points * 20).min(100),
+            Self::Point3 => match points {
+                0 => 0,
+                1 => 35,
+                2 => 60,
+                _ => 85,
+            },
+        }
+    }
+
+    /// The highest whole score of this format.
+    pub fn max_points(self) -> u32 {
+        match self {
+            Self::Point100 => 100,
+            Self::Point10Decimal | Self::Point10 => 10,
+            Self::Point5 => 5,
+            Self::Point3 => 3,
+        }
+    }
+
+    /// Converts user input in the user's format to `scoreRaw`.
     pub fn parse(self, input: &str) -> Result<u32, ParseScoreError> {
         let trimmed = input.trim();
         let err = || ParseScoreError {
@@ -267,12 +293,13 @@ pub struct MediaTitle {
 }
 
 impl MediaTitle {
-    /// Bevorzugter Anzeigetitel: Romaji, dann Englisch, dann Originaltitel.
+    /// The title to display: English where AniList has one, otherwise Romaji, then the
+    /// native title.
     pub fn preferred(&self) -> &str {
-        self.romaji
-            .as_deref()
-            .or(self.english.as_deref())
-            .or(self.native.as_deref())
+        [&self.english, &self.romaji, &self.native]
+            .into_iter()
+            .filter_map(|title| title.as_deref())
+            .find(|title| !title.trim().is_empty())
             .unwrap_or("(untitled)")
     }
 
@@ -349,7 +376,7 @@ pub struct ListEntry {
 }
 
 impl ListEntry {
-    fn is_watching(&self) -> bool {
+    pub fn is_watching(&self) -> bool {
         matches!(self.status, ListStatus::Current | ListStatus::Repeating)
     }
 
@@ -513,7 +540,8 @@ pub struct KindStats {
     pub chapters_read: u32,
     pub volumes_read: u32,
     pub statuses: Vec<StatusCount>,
-    /// Anzahl je Bewertung, Schlüssel 10 bis 100.
+    /// Entries per score. The keys are `scoreRaw` values from 1 to 100, whatever the
+    /// user's score format is.
     pub scores: Vec<StatBucket>,
     pub formats: Vec<StatBucket>,
     pub genres: Vec<StatBucket>,
@@ -535,8 +563,8 @@ impl KindStats {
             .sum()
     }
 
-    /// Anzahl je Bewertungsstufe von 10 bis 100. Stufen ohne Einträge haben 0, damit das
-    /// Diagramm immer alle zehn Balken zeigt.
+    /// Entries per score step from 10 to 100. Steps without entries have 0, so the chart
+    /// always shows all ten columns.
     pub fn score_counts(&self) -> [(u32, u32); 10] {
         let mut counts = [(0, 0); 10];
         for (index, slot) in counts.iter_mut().enumerate() {
@@ -546,11 +574,13 @@ impl KindStats {
             let Ok(score) = bucket.key.parse::<u32>() else {
                 continue;
             };
-            // Feinere Formate wie 85 zählen zur Stufe darunter, 0 heißt unbewertet.
-            if let Some(slot) = (score / 10)
-                .checked_sub(1)
-                .and_then(|i| counts.get_mut(i as usize))
-            {
+            // Finer scores such as 85 count towards the step below and 1 to 9 towards the
+            // lowest step; 0 means unscored.
+            if score == 0 {
+                continue;
+            }
+            let step = (score / 10).clamp(1, 10) as usize;
+            if let Some(slot) = counts.get_mut(step - 1) {
                 slot.1 += bucket.count;
             }
         }
@@ -595,6 +625,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn display_title_prefers_english_and_falls_back() {
+        let title =
+            |english: Option<&str>, romaji: Option<&str>, native: Option<&str>| MediaTitle {
+                romaji: romaji.map(str::to_owned),
+                english: english.map(str::to_owned),
+                native: native.map(str::to_owned),
+            };
+        let full = title(
+            Some("Frieren"),
+            Some("Sousou no Frieren"),
+            Some("葬送のフリーレン"),
+        );
+        assert_eq!(full.preferred(), "Frieren");
+        let no_english = title(None, Some("Sousou no Frieren"), Some("葬送のフリーレン"));
+        assert_eq!(no_english.preferred(), "Sousou no Frieren");
+        // An empty English title counts as missing.
+        let blank = title(Some(" "), None, Some("葬送のフリーレン"));
+        assert_eq!(blank.preferred(), "葬送のフリーレン");
+        assert_eq!(title(None, None, None).preferred(), "(untitled)");
+    }
+
+    #[test]
     fn score_counts_always_cover_ten_steps() {
         let bucket = |key: &str, count| StatBucket {
             key: key.to_owned(),
@@ -607,11 +659,12 @@ mod tests {
                 bucket("85", 2),
                 bucket("80", 1),
                 bucket("0", 9),
+                bucket("5", 1),
             ],
             ..KindStats::default()
         };
         let counts = stats.score_counts();
-        assert_eq!(counts[0], (10, 0));
+        assert_eq!(counts[0], (10, 1));
         assert_eq!(counts[6], (70, 4));
         assert_eq!(counts[7], (80, 3));
         assert_eq!(counts[9], (100, 0));

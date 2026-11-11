@@ -25,6 +25,7 @@ gstreamer.workspace = true
 gstreamer-app.workspace = true
 musubi-player.workspace = true
 async-trait.workspace = true
+resvg.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

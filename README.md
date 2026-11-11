@@ -65,13 +65,20 @@ Enter your server address, user name and password. The password is only used to 
 
 ### AniList
 
-Musubi does not ship a shared AniList client ID, so you create your own once:
+Click *Log in with AniList*. Musubi opens AniList in your browser; approve it there and you are logged in. AniList issues a token that is personal to your account, and there is nothing to copy or paste.
+
+<details>
+<summary>Using your own AniList API client, or logging in without a browser</summary>
+
+Musubi logs in through its own AniList API client. Under *Use my own API client or a token* you can enter the client ID of yours instead:
 
 1. Open <https://anilist.co/settings/developer> and create a new client.
 2. Use `http://127.0.0.1:47823/callback` as the redirect URL.
 3. Paste the client ID into Musubi and log in with your browser.
 
-> **No browser on this machine?** Use `https://anilist.co/api/v2/oauth/pin` as the redirect URL instead and run `musubi login anilist --pin`.
+No browser on this machine? Use `https://anilist.co/api/v2/oauth/pin` as the redirect URL of your own client instead and run `musubi login anilist --pin`.
+
+</details>
 
 AniList tokens are valid for one year. Musubi reminds you 14 days before yours expires.
 
@@ -79,12 +86,14 @@ AniList tokens are valid for one year. Musubi reminds you 14 days before yours e
 
 | Page | What it does |
 |---|---|
-| **Home** | Continue watching, next up, recently added |
-| **Library** | Browse and filter your Jellyfin library; open a title to see its seasons and episodes |
-| **AniList** | Your lists, airing schedule and quick `+1` progress |
+| **Home** | A large hero for what to continue, then rows for continue watching, next up and recently added |
+| **Library** | Browse and filter your Jellyfin library as a grid or a list; open a title to see its seasons and episodes, and to add its AniList match to one of your lists |
+| **AniList** | Airing titles with countdowns, what is in progress, your lists and quick `+1` progress |
 | **Mapping** | Check and change which AniList entry each season belongs to |
 | **Sync** | Compare Jellyfin and AniList and fix differences in either direction |
 | **Settings** | Accounts, sync and playback options |
+
+Library and AniList have a view switch at the top right: grid or list, each in three sizes. Musubi remembers the choice per page. The rows on Home scroll sideways with a touchpad swipe, `Shift` + mouse wheel, the arrows in the row header or the thin bar below the cards.
 
 ### Keyboard shortcuts
 
@@ -121,9 +130,9 @@ library_ids = []            # empty = all libraries
 # max_bitrate = 8000000     # unset = the server decides
 
 [anilist]
-client_id = "12345"
+# client_id = "12345"       # only for your own AniList API client
 login_flow = "loopback"     # or "pin"
-loopback_port = 47823
+loopback_port = 47823       # only used with your own client
 
 [sync]
 auto_sync = true
@@ -134,6 +143,14 @@ autoplay_next = true
 
 [secrets]
 backend = "file"            # or "secret-service" for KWallet / GNOME Keyring
+
+[ui.library]
+mode = "grid"               # or "list"
+size = "medium"             # "small", "medium" or "large"
+
+[ui.anilist]
+mode = "list"
+size = "medium"
 ```
 
 <details>
