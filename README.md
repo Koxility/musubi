@@ -6,10 +6,10 @@
 
 **Watch anime from your Jellyfin server. Your AniList keeps itself up to date.**
 
-[![Latest release](https://img.shields.io/github/v/release/Koxility/musubi?label=release&color=5ec2c4)](https://github.com/Koxility/musubi/releases/latest)
-[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-e0563f)](LICENSE)
-![Platform: Linux x86_64](https://img.shields.io/badge/platform-Linux%20x86__64-8e97a8)
-![Rust 1.95+](https://img.shields.io/badge/rust-1.95%2B-8e97a8)
+[![Latest release](https://img.shields.io/github/v/release/Koxility/musubi?label=release&color=3b82f6)](https://github.com/Koxility/musubi/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+![Platform: Linux x86_64](https://img.shields.io/badge/platform-Linux%20x86__green)
+![Rust 1.95+](https://img.shields.io/badge/rust-1.95%2B-green)
 
 [Install](#installation) · [Getting started](#getting-started) · [Using Musubi](#using-musubi) · [Configuration](#configuration) · [Documentation](#documentation)
 
