@@ -235,10 +235,6 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-## License
-
-Musubi is free software, licensed under the [GPL-3.0-or-later](LICENSE).
-
 ## Legal disclaimer
 
 Musubi is a client-side tool. It plays media from a Jellyfin server that you configure and have access to, and it updates the AniList account that you log in to. It does not host, provide, index or distribute any media, and it does not connect to any content source other than the services you set up yourself.
@@ -246,3 +242,7 @@ Musubi is a client-side tool. It plays media from a Jellyfin server that you con
 You are responsible for how you use it, for the content on the server you connect to, and for following the laws and terms of service that apply where you live. The project is provided "as is", without warranty of any kind. Its maintainers are not responsible for third-party content, external links, or the availability, accuracy, legality or reliability of outside services.
 
 Musubi is an independent project. It is not affiliated with, endorsed by or sponsored by Jellyfin or AniList; their names and trademarks belong to their respective owners. Questions about content hosted by another service should be directed to that service.
+
+## License
+
+Musubi is free software, licensed under the [MIT License](LICENSE).
