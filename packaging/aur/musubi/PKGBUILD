@@ -1,0 +1,65 @@
+# Maintainer: Koxility <https://github.com/Koxility>
+
+pkgname=musubi
+pkgver=0.4.2
+pkgrel=1
+pkgdesc='Stream anime from Jellyfin and keep your AniList in sync'
+arch=('x86_64')
+url='https://github.com/Koxility/musubi'
+license=('MIT' 'OFL-1.1')
+depends=(
+  'gcc-libs'
+  'glibc'
+  'glib2'
+  'gstreamer'
+  'gst-plugins-base'
+  'gst-plugins-base-libs'
+  'gst-plugins-good'
+  'gst-plugins-bad'
+  'gst-libav'
+  'hicolor-icon-theme'
+  'libxkbcommon'
+  'wayland'
+)
+makedepends=('cargo')
+optdepends=(
+  'org.freedesktop.secrets: keep login tokens in the desktop keyring (KWallet, GNOME Keyring)'
+  'gst-plugin-va: hardware video decoding through VA-API'
+  'vulkan-icd-loader: GPU rendering through Vulkan instead of OpenGL'
+)
+# makepkg's LTO flags would also reach the bundled C code (SQLite, aws-lc), a common cause
+# of link failures in Rust packages; Cargo already does thin LTO. The release profile
+# strips the binary, so a debug package would be empty.
+options=('!lto' '!debug')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+prepare() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  cargo build --frozen --release -p musubi
+}
+
+check() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  cargo test --frozen --release --workspace
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  install -Dm755 target/release/musubi -t "$pkgdir/usr/bin/"
+  install -Dm644 packaging/musubi.desktop -t "$pkgdir/usr/share/applications/"
+  install -Dm644 packaging/musubi.svg -t "$pkgdir/usr/share/icons/hicolor/scalable/apps/"
+  install -Dm644 README.md CHANGELOG.md -t "$pkgdir/usr/share/doc/$pkgname/"
+  install -Dm644 LICENSE crates/musubi-gui/fonts/{Sora,HankenGrotesk}-OFL.txt \
+    -t "$pkgdir/usr/share/licenses/$pkgname/"
+}

@@ -47,13 +47,35 @@ Musubi (結び, "knot, connection") is a desktop app for Linux that ties two thi
 
 ## Installation
 
-### 1. Install GStreamer
+Pick one of the three ways. On Arch and its derivatives, the package is the best choice: pacman pulls in GStreamer, keeps Musubi up to date and removes it cleanly.
 
-Arch, CachyOS and derivatives:
+### Arch Linux, CachyOS and derivatives
+
+Musubi comes in two packages: `musubi` builds from source, `musubi-bin` installs the prebuilt release binary. Both put `musubi` into `/usr/bin` and add it to your application launcher.
+
+From the [AUR](https://aur.archlinux.org/packages/musubi), with an AUR helper such as `paru` or `yay`:
 
 ```bash
-sudo pacman -S --needed gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-libav
+paru -S musubi
 ```
+
+Without an AUR helper, or before the packages appear on the AUR, build the package from this repository with `makepkg`:
+
+```bash
+git clone https://github.com/Koxility/musubi.git
+```
+
+```bash
+cd musubi/packaging/aur/musubi && makepkg -si
+```
+
+Use `packaging/aur/musubi-bin` instead to skip the build. Updates come with `paru -Syu`, or by running `git pull` and `makepkg -si` again; `sudo pacman -R musubi` removes Musubi.
+
+If you installed Musubi with `install.sh` before, remove that copy first, or its launcher entry and `~/.local/bin/musubi` keep starting the old version: `packaging/install.sh --uninstall` in the cloned repository does it.
+
+### Prebuilt binary
+
+For any other distribution on x86_64. First install GStreamer, which Musubi needs for playback.
 
 Debian and Ubuntu:
 
@@ -61,36 +83,43 @@ Debian and Ubuntu:
 sudo apt install gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav
 ```
 
-### 2. Install Musubi
-
-Download `musubi-<version>-x86_64-linux.tar.gz` from the [latest release](https://github.com/Koxility/musubi/releases/latest), then unpack and install it:
+Then download the latest release, check it and install it:
 
 ```bash
-tar xzf musubi-*-x86_64-linux.tar.gz
+curl -fLO https://github.com/Koxility/musubi/releases/latest/download/musubi-x86_64-linux.tar.gz
+curl -fLO https://github.com/Koxility/musubi/releases/latest/download/musubi-x86_64-linux.tar.gz.sha256
+sha256sum -c musubi-x86_64-linux.tar.gz.sha256
 ```
 
 ```bash
-cd musubi-*-x86_64-linux && ./install.sh
+tar xzf musubi-x86_64-linux.tar.gz && musubi-*-x86_64-linux/install.sh
 ```
 
-This puts `musubi` into `~/.local/bin` and adds Musubi to your application launcher. To install somewhere else, set `PREFIX`, for example `PREFIX=/usr/local sudo ./install.sh`.
+The [releases page](https://github.com/Koxility/musubi/releases/latest) has the same archive under its versioned name, `musubi-<version>-x86_64-linux.tar.gz`.
 
-To start `musubi` from a terminal as well, `~/.local/bin` has to be on your `PATH`. `install.sh` prints the command for your shell if it is not.
+`install.sh` puts `musubi` into `~/.local/bin`, adds the launcher entry and icon, and prints how to add `~/.local/bin` to your `PATH` if it is missing. It needs no root.
 
-<details>
-<summary>Building from source</summary>
+| Command | What it does |
+|---|---|
+| `./install.sh` | Install for your user, into `~/.local` |
+| `sudo ./install.sh --prefix /usr/local` | Install for all users |
+| `./install.sh --uninstall` | Remove it again; add the same `--prefix` you installed with |
 
-You need Rust 1.95 or newer, a C compiler, `pkgconf` and the GStreamer development files. [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) lists the packages per distribution.
+To update, install the new release the same way; it replaces the old files. Uninstalling keeps your settings and data.
+
+### From source
+
+You need Rust 1.95 or newer, a C compiler, `pkgconf` and the GStreamer development files; [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#building-from-source) lists the packages per distribution.
 
 ```bash
-git clone https://github.com/Koxility/musubi.git
+git clone https://github.com/Koxility/musubi.git && cd musubi
 ```
 
 ```bash
-cd musubi && cargo install --locked --path crates/musubi
+cargo build --release --locked -p musubi && packaging/install.sh
 ```
 
-</details>
+`packaging/install.sh` takes the same options as in the release archive. `cargo install --locked --path crates/musubi` works too, but installs only the binary, into `~/.cargo/bin`, without a launcher entry.
 
 ## Getting started
 
@@ -206,7 +235,7 @@ size = "medium"
 
 ## Troubleshooting
 
-- **"GStreamer is not available" at startup, or a title does not play.** Install the plugin sets from [step 1](#1-install-gstreamer). Everything except playback works without them.
+- **"GStreamer is not available" at startup, or a title does not play.** Install GStreamer and its plugin sets as shown under [Installation](#installation); the Arch packages pull them in. Everything except playback works without them.
 - **The launcher starts an old version.** The bottom of the sidebar shows the version and git commit of the running build. If it is not the one you installed, the launcher entry points at another binary.
 - **AniList changes do not arrive.** They are queued while AniList is unreachable or rate-limited and sent later. The *Sync* page lists what is waiting.
 - **Something else.** Start Musubi with `MUSUBI_LOG=debug musubi` and look at the logs in `~/.local/state/musubi/`, then [open an issue](https://github.com/Koxility/musubi/issues).

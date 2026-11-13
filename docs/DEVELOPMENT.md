@@ -16,21 +16,13 @@ Debian and Ubuntu:
 sudo apt install build-essential pkg-config libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav
 ```
 
-Build and install into `~/.cargo/bin`:
+Build and install into `~/.local`, with the launcher entry and icon. `--prefix` picks another place, `--uninstall` removes it again:
 
 ```bash
-cargo install --locked --path crates/musubi
+cargo build --release --locked -p musubi && packaging/install.sh
 ```
 
-Add the launcher entry and icon (optional). The entry starts `musubi` from your `PATH`, so `~/.cargo/bin` has to be on it, also for the desktop session:
-
-```bash
-install -Dm644 packaging/musubi.desktop ~/.local/share/applications/musubi.desktop
-```
-
-```bash
-install -Dm644 packaging/musubi.svg ~/.local/share/icons/hicolor/scalable/apps/musubi.svg
-```
+For a quick binary-only install into `~/.cargo/bin`, `cargo install --locked --path crates/musubi` works too. The launcher entry then has to be added by hand from `packaging/musubi.desktop` and `packaging/musubi.svg`, and starts `musubi` from your `PATH`.
 
 The bottom of the sidebar and of the Settings page show the version and git commit of the running build, e.g. `v0.1.0 · 218b921`. `crates/musubi-gui/build.rs` embeds the commit. If the commit doesn't match your checkout, your launcher starts an older binary.
 
@@ -74,7 +66,7 @@ Everything is written in English: code comments, UI, docs and commit messages. O
 
 ## Releasing
 
-1. Set the version in `Cargo.toml` (`[workspace.package]`) and run `cargo build` once, so `Cargo.lock` picks up the new version. The release workflow builds with `--locked` and fails otherwise.
+1. Set the version in `Cargo.toml` (`[workspace.package]`) and in both PKGBUILDs under `packaging/aur/`, and run `cargo build` once, so `Cargo.lock` picks up the new version. The release workflow builds with `--locked` and fails otherwise.
 2. Add a `## [x.y.z] - YYYY-MM-DD` section to `CHANGELOG.md`.
 3. Merge to `master`, then fetch it, tag and push. Without the fetch, `origin/master` can be stale and the tag lands on an older commit; the release then fails because the version doesn't match.
 
@@ -90,10 +82,30 @@ git tag -a vx.y.z -m "Musubi x.y.z" origin/master
 git push origin vx.y.z
 ```
 
-The tag starts `.github/workflows/release.yml`. It runs clippy and the tests, then builds the release binary. Next, `packaging/package.sh` packs it with `install.sh`, the launcher entry, the icon, README, CHANGELOG and LICENSE. Finally, the workflow publishes a GitHub release with the CHANGELOG section as its notes.
+The tag starts `.github/workflows/release.yml`. It runs clippy and the tests, then builds the release binary. Next, `packaging/package.sh` packs it with `install.sh`, the launcher entry, the icon, README, CHANGELOG and the licences. Finally, the workflow publishes a GitHub release with the CHANGELOG section as its notes. The archive is attached twice: as `musubi-x.y.z-x86_64-linux.tar.gz`, and as `musubi-x86_64-linux.tar.gz` for the version-less `releases/latest/download/` link in the README.
 
 `packaging/package.sh` refuses to run when the tag doesn't match `Cargo.toml` or the CHANGELOG has no section for the version. You can try it locally after `cargo build --release --locked -p musubi`:
 
 ```bash
 packaging/package.sh x.y.z
 ```
+
+### Arch packages
+
+`packaging/aur/musubi` builds from the GitHub source tarball of the tag, `packaging/aur/musubi-bin` repackages the release archive. Bump `pkgver` in both together with `Cargo.toml` and reset `pkgrel` to 1. Their checksums can only be filled in once the release exists, so the tagged commit carries `sha256sums=('SKIP')`. After the workflow has published the release, run on an Arch machine (needs `pacman-contrib`):
+
+```bash
+packaging/aur/update.sh
+```
+
+It fills in the checksums and regenerates `.SRCINFO`. Build both once with `makepkg -si` in a clean chroot or at least a clean directory, commit the result to `master`, then copy `PKGBUILD` and `.SRCINFO` of each into its AUR repository and push:
+
+```bash
+git clone ssh://aur@aur.archlinux.org/musubi.git aur-musubi
+```
+
+```bash
+cp packaging/aur/musubi/{PKGBUILD,.SRCINFO} aur-musubi/ && cd aur-musubi && git add PKGBUILD .SRCINFO && git commit -m "Update to x.y.z" && git push
+```
+
+The same for `musubi-bin`. A fix to the packaging alone, without a new release, raises `pkgrel` instead of `pkgver`.

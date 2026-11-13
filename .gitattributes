@@ -1,0 +1,2 @@
+# Lets `git archive` and the source tarballs on GitHub record their commit for the build.
+crates/musubi-gui/commit.txt export-subst
