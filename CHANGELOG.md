@@ -4,6 +4,23 @@ All notable changes to Musubi are documented here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-11-13
+
+### Added
+
+- **Arch Linux packages.** `packaging/aur/` holds two PKGBUILDs: `musubi` builds from source, `musubi-bin` installs the release binary. Both put Musubi into `/usr/bin` with its launcher entry, icon and licences, so pacman tracks and removes it.
+- **`install.sh --uninstall`** removes an installation again, and `--prefix DIR` picks where to install. `PREFIX` still works.
+
+### Changed
+
+- `install.sh` also installs from a source checkout after `cargo build --release`, installs the licence files, and warns when GStreamer is missing.
+- The README's installation section starts with Arch, then the release archive, then building from source.
+- The package metadata names the MIT licence, matching `LICENSE`.
+
+### Fixed
+
+- **The version line shows the right commit for packaged builds.** A build from a source tarball showed `unknown`, or the commit of whatever repository the tarball was unpacked in, such as an AUR package clone. It now reads the commit that GitHub records in the tarball.
+
 ## [0.4.1] - 2026-11-11
 
 ### Added
@@ -110,6 +127,7 @@ First release.
 - Playback needs GStreamer with `gst-plugins-base`, `-good`, `-bad` and `gst-libav`.
 - You need your own AniList client ID; see the README.
 
+[0.4.2]: https://github.com/Koxility/musubi/releases/tag/v0.4.2
 [0.4.1]: https://github.com/Koxility/musubi/releases/tag/v0.4.1
 [0.4.0]: https://github.com/Koxility/musubi/releases/tag/v0.4.0
 [0.3.0]: https://github.com/Koxility/musubi/releases/tag/v0.3.0
