@@ -28,8 +28,8 @@ optdepends=(
   'vulkan-icd-loader: GPU rendering through Vulkan instead of OpenGL'
 )
 # makepkg's LTO flags would also reach the bundled C code (SQLite, aws-lc), a common cause
-# of link failures in Rust packages; Cargo already does thin LTO. The release profile strips the binary, so a debug package
-# would be empty.
+# of link failures in Rust packages; Cargo already does thin LTO. The release profile
+# strips the binary, so a debug package would be empty.
 options=('!lto' '!debug')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('SKIP')
