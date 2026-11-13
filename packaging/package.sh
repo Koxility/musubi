@@ -5,7 +5,9 @@
 #   packaging/package.sh 0.1.0
 #
 # Produces dist/musubi-<version>-x86_64-linux.tar.gz, a .sha256 file next to it,
-# and dist/notes.md with the CHANGELOG section of that version.
+# the same archive as dist/musubi-x86_64-linux.tar.gz for the stable
+# releases/latest/download/ link in the README, and dist/notes.md with the CHANGELOG
+# section of that version.
 set -eu
 
 version=${1:?usage: packaging/package.sh <version>}
@@ -42,7 +44,12 @@ install -m644 packaging/musubi.desktop packaging/musubi.svg \
 install -m644 crates/musubi-gui/fonts/Sora-OFL.txt \
     crates/musubi-gui/fonts/HankenGrotesk-OFL.txt "dist/$name/"
 tar -C dist -czf "dist/$name.tar.gz" "$name"
-(cd dist && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256")
+cp "dist/$name.tar.gz" dist/musubi-x86_64-linux.tar.gz
+(
+    cd dist
+    sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
+    sha256sum musubi-x86_64-linux.tar.gz > musubi-x86_64-linux.tar.gz.sha256
+)
 printf '%s\n' "$notes" | sed -e '/./,$!d' > dist/notes.md
 
 echo "dist/$name.tar.gz"

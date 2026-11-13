@@ -1,4 +1,4 @@
-# Builds the Linux archive and publishes a GitHub release when a version tag is pushed.
+# Builds the Linux archives and publishes a GitHub release when a version tag is pushed.
 #
 #   git tag -a v0.1.0 -m "Musubi 0.1.0" && git push origin v0.1.0
 #
