@@ -1,0 +1,31 @@
+pkgbase = musubi-bin
+	pkgdesc = Stream anime from Jellyfin and keep your AniList in sync (prebuilt binary)
+	pkgver = 0.4.2
+	pkgrel = 1
+	url = https://github.com/Koxility/musubi
+	arch = x86_64
+	license = MIT
+	license = OFL-1.1
+	depends = gcc-libs
+	depends = glibc
+	depends = glib2
+	depends = gstreamer
+	depends = gst-plugins-base
+	depends = gst-plugins-base-libs
+	depends = gst-plugins-good
+	depends = gst-plugins-bad
+	depends = gst-libav
+	depends = hicolor-icon-theme
+	depends = libxkbcommon
+	depends = wayland
+	optdepends = org.freedesktop.secrets: keep login tokens in the desktop keyring (KWallet, GNOME Keyring)
+	optdepends = gst-plugin-va: hardware video decoding through VA-API
+	optdepends = vulkan-icd-loader: GPU rendering through Vulkan instead of OpenGL
+	provides = musubi=0.4.2
+	conflicts = musubi
+	options = !strip
+	options = !debug
+	source = https://github.com/Koxility/musubi/releases/download/v0.4.2/musubi-0.4.2-x86_64-linux.tar.gz
+	sha256sums = SKIP
+
+pkgname = musubi-bin
