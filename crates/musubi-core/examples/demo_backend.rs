@@ -8,6 +8,9 @@
 //! Mit `--login` meldet es zusätzlich das Profil unter den üblichen XDG-Pfaden an beiden Attrappen
 //! an. Zusammen mit eigenen `XDG_*`-Verzeichnissen startet die GUI so direkt mit Inhalt, etwa für
 //! Bildschirmfotos.
+//!
+//! With `--update` it also stands in for GitHub and announces a newer release. Point
+//! `MUSUBI_DEV_UPDATE_ENDPOINT` at the printed `UPDATE` URL to see the update button.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -497,6 +500,22 @@ async fn anilist() -> MockServer {
     server
 }
 
+/// Stands in for GitHub in the update check and announces a release far ahead of any
+/// real one, so the update button and badge can be seen.
+async fn github() -> MockServer {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/releases/latest"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "tag_name": "v99.0.0",
+            "html_url": "https://github.com/Koxility/musubi/releases/latest",
+            "assets": [],
+        })))
+        .mount(&server)
+        .await;
+    server
+}
+
 /// Meldet das Profil unter den XDG-Pfaden an beiden Attrappen an.
 async fn login(jellyfin: &str, anilist: &str) {
     use musubi_core::{Core, CoreOptions, Paths};
@@ -521,11 +540,20 @@ async fn login(jellyfin: &str, anilist: &str) {
 async fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let with_login = args.iter().any(|a| a == "--login");
-    args.retain(|a| a != "--login");
+    let with_update = args.iter().any(|a| a == "--update");
+    args.retain(|a| a != "--login" && a != "--update");
     let video = args.first().map(PathBuf::from);
     let (jf, al) = (jellyfin(video).await, anilist().await);
     println!("JELLYFIN={}", jf.uri());
     println!("ANILIST={}", al.uri());
+    // Only with --update, so the app otherwise shows itself as up to date.
+    let _github = if with_update {
+        let github = github().await;
+        println!("UPDATE={}", github.uri());
+        Some(github)
+    } else {
+        None
+    };
     if with_login {
         login(&jf.uri(), &al.uri()).await;
     }

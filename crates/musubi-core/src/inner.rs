@@ -56,6 +56,8 @@ pub(crate) struct Inner {
     pub active: Mutex<Option<ActivePlayback>>,
     pub generation: Mutex<u64>,
     pub anilist_endpoint: Option<String>,
+    pub update_endpoint: Option<String>,
+    pub install_kind: Option<crate::updates::InstallKind>,
     pub http: reqwest::Client,
 }
 
@@ -65,11 +67,16 @@ pub struct Core {
     pub(crate) inner: Arc<Inner>,
 }
 
-/// Abweichungen vom Normalbetrieb, vor allem für Tests.
+/// Deviations from normal operation, mostly for tests.
 #[derive(Default)]
 pub struct CoreOptions {
     pub anilist_endpoint: Option<String>,
     pub player: Option<Arc<dyn PlayerBackend>>,
+    /// Stands in for GitHub in the update check: serves `/releases/latest` and
+    /// `/aur/<package>/PKGBUILD`.
+    pub update_endpoint: Option<String>,
+    /// Treats this copy as installed that way instead of looking at the running binary.
+    pub install_kind: Option<crate::updates::InstallKind>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -242,6 +249,8 @@ impl Core {
             active: Mutex::new(None),
             generation: Mutex::new(0),
             anilist_endpoint: options.anilist_endpoint,
+            update_endpoint: options.update_endpoint,
+            install_kind: options.install_kind,
             http,
         });
 

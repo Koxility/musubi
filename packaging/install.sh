@@ -25,13 +25,30 @@ prefix=${PREFIX:-"$HOME/.local"}
 action=install
 while [ $# -gt 0 ]; do
     case "$1" in
-        --prefix) prefix=${2:?--prefix needs a directory}; shift 2 ;;
+        --prefix)
+            if [ $# -lt 2 ]; then
+                echo "--prefix needs a directory" >&2
+                exit 2
+            fi
+            prefix=$2
+            shift 2
+            ;;
         --prefix=*) prefix=${1#--prefix=}; shift ;;
         --uninstall) action=uninstall; shift ;;
         -h | --help) usage; exit 0 ;;
         *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
     esac
 done
+
+# Checked before any path is built from it: an empty prefix would install into /bin and
+# /share, and a line break cannot be written into the launcher entry.
+case "$prefix" in
+    "") echo "The install prefix is empty. Pass a directory to --prefix." >&2; exit 2 ;;
+    *"
+"*) echo "The install prefix must not contain a line break." >&2; exit 2 ;;
+    /*) ;;
+    *) prefix="$(pwd)/$prefix" ;;
+esac
 
 here=$(cd "$(dirname "$0")" && pwd)
 bin="$prefix/bin"
@@ -98,14 +115,27 @@ install -Dm755 "$binary" "$bin/musubi"
 install -Dm644 "$here/musubi.svg" "$icons/scalable/apps/musubi.svg"
 install -Dm644 "$docs/LICENSE" "$licenses/LICENSE"
 # The binary embeds these fonts; their licence asks to ship its text along.
-for font in Sora HankenGrotesk; do
-    install -Dm644 "$fonts/$font-OFL.txt" "$licenses/$font-OFL.txt"
+for licence in "$fonts"/*-OFL.txt; do
+    install -Dm644 "$licence" "$licenses/$(basename "$licence")"
 done
 
 # The launcher entry points at the installed binary directly, so it works even when the
 # desktop session's PATH does not include $bin.
+# The path is written as a quoted argument, as the desktop entry specification asks for
+# anything with spaces or other reserved characters: inside the quotes, backslash, double
+# quote, backtick and dollar sign get a backslash, every backslash is then doubled once
+# more because Exec is a string value, and a percent sign is doubled.
+desktop_quote() {
+    printf '%s' "$1" | sed -e 's/\\/\\\\\\\\/g' -e 's/["`$]/\\\\&/g' -e 's/%/%%/g'
+}
 mkdir -p "$applications"
-sed "s|^Exec=musubi |Exec=$bin/musubi |" "$here/musubi.desktop" > "$applications/musubi.desktop"
+exec_path=$(desktop_quote "$bin/musubi")
+while IFS= read -r line; do
+    case "$line" in
+        "Exec=musubi "*) printf 'Exec="%s" %s\n' "$exec_path" "${line#Exec=musubi }" ;;
+        *) printf '%s\n' "$line" ;;
+    esac
+done < "$here/musubi.desktop" > "$applications/musubi.desktop"
 chmod 644 "$applications/musubi.desktop"
 refresh_desktop
 

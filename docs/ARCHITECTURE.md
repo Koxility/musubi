@@ -33,8 +33,9 @@ Dependencies only point downwards, and the crate boundaries let the compiler enf
 The GUI is pure Rust without system toolkits like GTK and looks the same on every desktop.
 
 - Each page owns its state, messages and view, and `app.rs` wires them to the core.
-- The design system lives in `theme/`: `tokens.rs` names every colour, spacing step, radius and font size, `fonts.rs` embeds Sora (titles) and Hanken Grotesk (text), and `styles.rs` builds all widget styles from those tokens. Pages use the tokens and the components in `ui.rs` instead of literals.
-- Two accent colours carry meaning. Red (`WATCH`) marks watching in Jellyfin: play, resume, playback progress. Teal (`TRACK`) marks tracking on AniList: status, list progress, sync. The knot mark shows where a title is connected to both.
+- The design system lives in `theme/`: `tokens.rs` names every colour, spacing step, radius and font size, `fonts.rs` embeds Geist (interface) and Geist Mono (versions and other fixed text), and `styles.rs` builds all widget styles from those tokens. Pages use the tokens and the components in `ui.rs` instead of literals.
+- The look is shared with [Kura](https://github.com/Koxility/kura): the neutral scale (`BG`, `SURFACE`, `HOVER`, `LINE`, `TEXT`, `TEXT_2`, `TEXT_3`), the state colours (`OK`, `WARN`, `BAD`, `INFO`), the 8px radius and the type sizes are the values of Kura's `tokens.css`. There is no brand colour: a primary action is `TEXT` on `BG` turned around, everything else is outlined or bare, and surfaces are flat with hairline borders. `INFO` blue is used for updates only.
+- Two accent colours carry meaning on top of that. Red (`WATCH`) marks watching in Jellyfin: playback progress, the Jellyfin connection, unwatched counts. Teal (`TRACK`) marks tracking on AniList: status, list progress, sync, the `+1` pill. They mark things and never fill a large area; buttons do not use them. The knot mark shows where a title is connected to both.
 - The logo has one source, `packaging/musubi.svg`. `logo.rs` draws it in the sidebar and the About line and renders it with resvg for the window icon; the launcher entry installs the same file.
 - Icons are hand-made SVGs in `icons.rs`, rendered by resvg. A test parses every icon with usvg so a broken one cannot silently disappear.
 - Library and AniList offer a grid and a list in three sizes. The choice is stored per page in `config.toml` (`[ui.library]`, `[ui.anilist]`) through `Core::update_config`.
@@ -131,10 +132,21 @@ Every AniList write first lands in the SQLite table `outbox`, and the UI updates
 
 The rate limiter starts at the measured limit of 30 requests per minute, adopts `X-RateLimit-Limit` from every response and honors `Retry-After`.
 
+### Updates
+
+`musubi-core/src/updates.rs` holds the whole update flow; the GUI only calls `check_for_update` once at startup and `install_update` when the button is pressed.
+
+- **Check.** One request to GitHub's "latest release" endpoint; the tag is compared with the running version. A failed check is logged and shown as "up to date".
+- **How the copy was installed** decides the rest, read from the running binary: pacman owns it (`pacman -Qqo`), or it sits at `<prefix>/bin/musubi` next to the launcher entry that `install.sh` writes in a prefix the user can write to, or neither.
+- **`install.sh` copy.** The release archive and its `.sha256` are downloaded to the cache directory, the checksum is verified with `sha256sum`, and the archive's own `install.sh --prefix <prefix>` replaces the installation. A mismatch installs nothing.
+- **Pacman copy.** An update is only offered once `packaging/aur/<package>/PKGBUILD` on `master` has reached the version, because that file is what gets built. It is written to the cache directory and `makepkg -si` runs on it in a terminal (`xdg-terminal-exec`, `$TERMINAL`, then a list of common terminals), since installing needs the user's password. Without a terminal the GUI shows the command.
+- **Anything else** gets a dialog with the release page.
+
 ## Security
 
 - **Credentials.** By default they live in `credentials.toml` with mode 0600 in a 0700 directory, written atomically. More permissive modes abort startup. Secret Service can be chosen in the config.
 - **Passwords and tokens.** Passwords are never stored. Tokens are held as `SecretString` and never appear in logs.
+- **Updates.** A release archive is installed only after it matches its published checksum, and nothing is ever run as root by Musubi itself: package installs go through `makepkg` and pacman in a terminal the user sees. The check sends Musubi's version in the user agent and nothing about accounts or the library.
 - **AniList login.** It uses the implicit grant, so no client secret is needed. The client ID comes from the user's config or, failing that, is the one of Musubi's own AniList client (`oauth::BUILTIN_CLIENT_ID`); either way the token AniList issues is personal to the user who approved. The loopback server listens on 127.0.0.1 only, checks the Host header, and uses a random path per login. It accepts the token only after verifying it with `Viewer`.
 
 ## Known limitations

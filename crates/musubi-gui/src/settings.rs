@@ -1,4 +1,4 @@
-//! Anmeldungen und Einstellungen.
+//! Logins and settings.
 
 use iced::widget::{column, container, row, slider, text};
 use iced::{Center, Element, Fill, Task};
@@ -6,7 +6,7 @@ use musubi_core::Config;
 
 use crate::anilist_login::{self, Outcome};
 use crate::app::{App, COMMIT, Message, VERSION};
-use crate::{logo, setup, theme, ui};
+use crate::{logo, setup, theme, ui, updates};
 
 #[derive(Default)]
 pub struct State {
@@ -152,7 +152,8 @@ pub fn update(app: &mut App, msg: Msg) -> Task<Message> {
     Task::none()
 }
 
-/// Kopf eines Abschnitts: Name links, Verbindungsstand rechts in der Kordelfarbe.
+/// Head of a section: the name on the left, the connection state on the right in the
+/// cord colour.
 fn service_head<'a>(
     name: &'a str,
     connected: bool,
@@ -169,7 +170,7 @@ fn service_head<'a>(
             } else {
                 "Not connected"
             },
-            if connected { cord } else { theme::MUTED }
+            if connected { cord } else { theme::TEXT_2 }
         ),
     ]
     .spacing(theme::S3)
@@ -177,21 +178,25 @@ fn service_head<'a>(
     .into()
 }
 
-/// Version und Git-Stand dieses Builds, damit Fehlerberichte eindeutig sind.
 fn half<'a>(field: Element<'a, Msg>) -> Element<'a, Msg> {
     container(field).width(Fill).into()
 }
 
-fn about<'a>() -> Element<'a, Msg> {
-    let fact = |name: &'a str, value: &'a str| {
+/// Version and git commit of this build, so bug reports are unambiguous, and the update
+/// button next to them.
+fn about(app: &App) -> Element<'_, Message> {
+    let fact = |name: &'static str, value: &'static str| {
         row![
             ui::muted(name),
-            text(value).size(theme::T_SMALL).font(theme::SEMIBOLD),
+            text(value)
+                .size(theme::T_SMALL)
+                .font(theme::MONO)
+                .color(theme::TEXT),
         ]
         .spacing(6)
         .align_y(Center)
     };
-    row![
+    let line = row![
         logo::mark(36.0),
         column![
             text("Musubi").size(theme::T_BODY).font(theme::DISPLAY),
@@ -201,10 +206,16 @@ fn about<'a>() -> Element<'a, Msg> {
         ui::spacer(),
         fact("Version", VERSION),
         fact("Commit", COMMIT),
+        updates::action(&app.updates),
     ]
     .spacing(theme::S4)
-    .align_y(Center)
-    .into()
+    .align_y(Center);
+    match updates::hint(&app.updates) {
+        Some(hint) => column![line, row![ui::spacer(), hint]]
+            .spacing(theme::S2)
+            .into(),
+        None => line.into(),
+    }
 }
 
 pub fn view(app: &App) -> Element<'_, Message> {
@@ -235,7 +246,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
             None
         ),
         row![
-            ui::watch("Log in to Jellyfin", Msg::LoginJellyfin),
+            ui::primary("Log in to Jellyfin", Msg::LoginJellyfin),
             ui::quiet("Log out", Msg::LogoutJellyfin),
         ]
         .spacing(theme::S2)
@@ -269,7 +280,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
                 text(format!("{:.0}%", s.threshold))
                     .size(theme::T_BODY)
                     .font(theme::SEMIBOLD)
-                    .color(theme::TRACK),
+                    .color(theme::TEXT),
             ]
             .spacing(6),
             slider(50.0..=100.0, s.threshold, |v| Msg::Edit(Edit::Threshold(v)))
@@ -280,26 +291,29 @@ pub fn view(app: &App) -> Element<'_, Message> {
         row![ui::primary("Save settings", Msg::Save)],
     ]
     .spacing(theme::S4);
-    let body = column![
-        ui::page_header(
-            "Settings",
-            None,
-            vec![ui::secondary("Run setup again", Msg::RunSetup)]
-        ),
+    let header: Element<'_, Msg> = ui::page_header(
+        "Settings",
+        None,
+        vec![ui::secondary("Run setup again", Msg::RunSetup)],
+    );
+    let cards = [
+        header,
         ui::card(jellyfin),
         ui::card(anilist),
         ui::card(preferences),
         ui::divider(),
-        about(),
     ]
-    .spacing(theme::S4)
-    .max_width(820)
-    .padding(iced::Padding {
-        top: theme::S5,
-        right: ui::PAGE_PADDING,
-        bottom: theme::S6,
-        left: ui::PAGE_PADDING,
-    });
-    let page: Element<'_, Msg> = ui::scroll(body);
-    page.map(Message::Settings)
+    .into_iter()
+    .map(|part| part.map(Message::Settings));
+    let body = column(cards)
+        .push(about(app))
+        .spacing(theme::S4)
+        .max_width(820)
+        .padding(iced::Padding {
+            top: theme::S5,
+            right: ui::PAGE_PADDING,
+            bottom: theme::S6,
+            left: ui::PAGE_PADDING,
+        });
+    ui::scroll(body)
 }

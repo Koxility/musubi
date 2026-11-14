@@ -33,8 +33,11 @@ pub fn icon<'a, M: 'a>(icon: Icon, size: f32, color: Color) -> Element<'a, M> {
         .into()
 }
 
-/// Hängt einen kurzen Hinweis an, der beim Überfahren erscheint.
-pub fn with_tip<'a, M: 'a>(content: impl Into<Element<'a, M>>, label: &'a str) -> Element<'a, M> {
+/// Attaches a short hint that shows on hover.
+pub fn with_tip<'a, M: 'a>(
+    content: impl Into<Element<'a, M>>,
+    label: impl text::IntoFragment<'a>,
+) -> Element<'a, M> {
     tooltip(
         content,
         container(text(label).size(theme::T_LABEL))
@@ -90,21 +93,21 @@ pub fn icon_label<'a, M: Clone + 'a>(
     .into()
 }
 
-/// The main action on the Home hero: a large red pill.
+/// The main action on the Home hero: a large light pill.
 pub fn hero_action<'a, M: Clone + 'a>(glyph: Icon, label: &'a str, message: M) -> Element<'a, M> {
     button(
         row![
-            icon(glyph, 22.0, theme::INK),
+            icon(glyph, 22.0, theme::BG),
             text(label)
                 .size(theme::T_TITLE)
                 .font(SEMIBOLD)
-                .color(theme::INK)
+                .color(theme::BG)
         ]
         .spacing(S2)
         .align_y(Center),
     )
     .padding([13, 30])
-    .style(theme::watch_pill)
+    .style(theme::primary_pill)
     .on_press(message)
     .into()
 }
@@ -135,9 +138,9 @@ pub fn tool<'a, M: Clone + 'a>(
 /// to hit on top of a cover. Without a message it is visibly disabled.
 pub fn plus_one<'a, M: Clone + 'a>(message: Option<M>, tip: &'a str) -> Element<'a, M> {
     let color = if message.is_some() {
-        theme::INK
+        theme::BG
     } else {
-        theme::FAINT
+        theme::TEXT_3
     };
     let content = button(
         row![
@@ -178,7 +181,7 @@ pub fn view_controls<'a, M: Clone + 'a>(
     if modes {
         let mode = |glyph, value: ViewMode, tip| {
             let active = view.mode == value;
-            let color = if active { theme::PAPER } else { theme::MUTED };
+            let color = if active { theme::TEXT } else { theme::TEXT_2 };
             segment(
                 icon(glyph, 16.0, color),
                 active,
@@ -299,7 +302,7 @@ pub fn page_title<'a, M: 'a>(label: impl text::IntoFragment<'a>) -> Element<'a, 
     text(label)
         .size(theme::T_PAGE)
         .font(theme::DISPLAY)
-        .color(theme::PAPER)
+        .color(theme::TEXT)
         .into()
 }
 
@@ -308,7 +311,7 @@ pub fn heading<'a, M: 'a>(label: impl text::IntoFragment<'a>) -> Element<'a, M> 
     text(label)
         .size(theme::T_TITLE)
         .font(theme::DISPLAY)
-        .color(theme::PAPER)
+        .color(theme::TEXT)
         .into()
 }
 
@@ -322,7 +325,7 @@ pub fn heading_count<'a, M: 'a>(
         text(count.to_string())
             .size(theme::T_SMALL)
             .font(theme::MEDIUM)
-            .color(theme::FAINT),
+            .color(theme::TEXT_3),
     ]
     .spacing(S2)
     .align_y(iced::Bottom)
@@ -330,7 +333,7 @@ pub fn heading_count<'a, M: 'a>(
 }
 
 pub fn muted<'a, M: 'a>(label: impl text::IntoFragment<'a>) -> Element<'a, M> {
-    text(label).size(theme::T_SMALL).color(theme::MUTED).into()
+    text(label).size(theme::T_SMALL).color(theme::TEXT_2).into()
 }
 
 /// Beschriftung über einem Feld oder einer Kennzahl.
@@ -338,7 +341,7 @@ pub fn label<'a, M: 'a>(value: impl text::IntoFragment<'a>) -> Element<'a, M> {
     text(value)
         .size(theme::T_LABEL)
         .font(theme::MEDIUM)
-        .color(theme::MUTED)
+        .color(theme::TEXT_2)
         .into()
 }
 
@@ -353,21 +356,16 @@ fn text_button<'a, M: Clone + 'a>(
     message: M,
     style: ButtonStyle,
 ) -> Element<'a, M> {
-    button(text(label).size(theme::T_SMALL).font(SEMIBOLD))
-        .padding([8, 16])
+    button(text(label).size(theme::T_SMALL).font(theme::MEDIUM))
+        .padding([S2, 14.0])
         .style(style)
         .on_press(message)
         .into()
 }
 
-/// Hauptaktion rund um AniList und allgemeine Bestätigungen.
+/// The main action of a view or dialog.
 pub fn primary<'a, M: Clone + 'a>(label: &'a str, message: M) -> Element<'a, M> {
-    text_button(label, message, theme::track)
-}
-
-/// Hauptaktion rund ums Ansehen.
-pub fn watch<'a, M: Clone + 'a>(label: &'a str, message: M) -> Element<'a, M> {
-    text_button(label, message, theme::watch)
+    text_button(label, message, theme::primary)
 }
 
 pub fn secondary<'a, M: Clone + 'a>(label: &'a str, message: M) -> Element<'a, M> {
@@ -382,7 +380,7 @@ pub fn danger<'a, M: Clone + 'a>(label: &'a str, message: M) -> Element<'a, M> {
     text_button(label, message, theme::danger)
 }
 
-/// Auswahl-Chip in einer Kordelfarbe.
+/// Choice chip; the active one is edged in the cord colour.
 pub fn chip<'a, M: Clone + 'a>(
     label: impl text::IntoFragment<'a>,
     active: bool,
@@ -396,7 +394,7 @@ pub fn chip<'a, M: Clone + 'a>(
         .into()
 }
 
-/// Reiter mit Unterstreichung in der Kordelfarbe.
+/// Tabs, the active one underlined in the cord colour.
 pub fn tabs<'a, M: Clone + 'a>(
     items: impl IntoIterator<Item = (String, bool, M)>,
     cord: Color,
@@ -424,7 +422,7 @@ pub fn tabs<'a, M: Clone + 'a>(
     row(tabs).spacing(S5).into()
 }
 
-// Eingaben ------------------------------------------------------------------------------
+// Inputs --------------------------------------------------------------------------------
 
 pub fn field<'a, M: Clone + 'a>(
     name: &'a str,
@@ -436,7 +434,7 @@ pub fn field<'a, M: Clone + 'a>(
         text_input("", value)
             .on_input(on_input)
             .size(theme::T_BODY)
-            .padding([8, 10])
+            .padding([10, 12])
             .style(theme::input),
     ]
     .spacing(6)
@@ -456,14 +454,14 @@ pub fn secret_field<'a, M: Clone + 'a>(
             .on_input(on_input)
             .on_submit_maybe(on_submit)
             .size(theme::T_BODY)
-            .padding([8, 10])
+            .padding([10, 12])
             .style(theme::input),
     ]
     .spacing(6)
     .into()
 }
 
-/// Auswahlliste im Stil der App.
+/// Pick list in the app's style.
 pub fn pick<'a, M: Clone + 'a>(
     options: Vec<String>,
     selected: Option<String>,
@@ -520,7 +518,7 @@ pub fn picture<'a, M: Clone + 'a>(
                 .width(width)
                 .height(height)
                 .content_fit(ContentFit::Cover)
-                .border_radius(theme::R_SM);
+                .border_radius(theme::R_COVER);
             if width == Length::Fill {
                 // A picture that fills the width is cropped to its frame, often by a lot.
                 // The software renderer ignores the image's own clip, so the part outside
@@ -633,7 +631,7 @@ pub fn shelf<'a, M: Clone + 'a>(
         icon_button(
             glyph,
             17.0,
-            theme::PAPER,
+            theme::TEXT,
             Some(on_scroll(id, step)),
             label,
             theme::ghost_button,
@@ -643,11 +641,11 @@ pub fn shelf<'a, M: Clone + 'a>(
         text(title)
             .size(theme::T_SECTION)
             .font(theme::DISPLAY)
-            .color(theme::PAPER),
+            .color(theme::TEXT),
         text(count.to_string())
             .size(theme::T_BODY)
             .font(theme::MEDIUM)
-            .color(theme::FAINT),
+            .color(theme::TEXT_3),
     ]
     .spacing(S2)
     .align_y(iced::Bottom);
@@ -753,7 +751,7 @@ pub fn bar<'a, M: 'a>(fraction: f32, color: Color, height: f32) -> Element<'a, M
     }
     container(parts)
         .width(Fill)
-        .style(theme::solid(theme::alpha(theme::PAPER, 0.06), height / 2.0))
+        .style(theme::solid(theme::alpha(theme::TEXT, 0.06), height / 2.0))
         .into()
 }
 
@@ -761,11 +759,11 @@ pub fn bar<'a, M: 'a>(fraction: f32, color: Color, height: f32) -> Element<'a, M
 pub fn empty_state<'a, M: 'a>(glyph: Icon, title: &'a str, hint: &'a str) -> Element<'a, M> {
     center(
         column![
-            icon(glyph, 36.0, theme::FAINT),
+            icon(glyph, 36.0, theme::TEXT_3),
             text(title)
                 .size(theme::T_TITLE)
                 .font(theme::DISPLAY)
-                .color(theme::PAPER),
+                .color(theme::TEXT),
             container(muted(hint)).max_width(420),
         ]
         .spacing(S2)
@@ -775,10 +773,10 @@ pub fn empty_state<'a, M: 'a>(glyph: Icon, title: &'a str, hint: &'a str) -> Ele
     .into()
 }
 
-/// Legt einen Dialog mittig über die Seite und sperrt alles dahinter.
+/// Puts a dialog in the middle of the page and blocks everything behind it.
 pub fn modal<'a, M: 'a>(
     base: Element<'a, M>,
-    title: &'a str,
+    title: impl text::IntoFragment<'a>,
     width: f32,
     body: Element<'a, M>,
 ) -> Element<'a, M> {

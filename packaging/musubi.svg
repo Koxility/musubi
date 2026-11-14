@@ -1,13 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
-  <!-- Musubi (結び): zwei Kordeln, rot für das Ansehen und türkis für das Verfolgen, zum Knoten
-       verschlungen. An den Kreuzungen liegt abwechselnd die eine über der anderen. -->
-  <rect width="128" height="128" rx="28" fill="#131a2a"/>
-  <rect x="1" y="1" width="126" height="126" rx="27" fill="none" stroke="#ece6da" stroke-opacity=".08" stroke-width="2"/>
+  <!-- Musubi (結び): two cords, red for watching and teal for tracking, tied into a knot.
+       At the crossings they take turns lying on top. The colours are the tokens SURFACE,
+       LINE, WATCH and TRACK of the app's theme. -->
+  <rect width="128" height="128" rx="28" fill="#141414"/>
+  <rect x="1" y="1" width="126" height="126" rx="27" fill="none" stroke="#262626" stroke-width="2"/>
   <g fill="none" stroke-width="12">
-    <path stroke="#5ec2c4" stroke-linecap="round" d="M112 42H75A22 22 0 1 0 75 86A22 22 0 1 0 75 42"/>
-    <path stroke="#131a2a" stroke-width="17" d="M54.15 42.03A22 22 0 0 1 71.45 52.02"/>
-    <path stroke="#e0563f" stroke-linecap="round" d="M16 86H53A22 22 0 1 0 53 42A22 22 0 1 0 53 86"/>
-    <path stroke="#131a2a" stroke-width="17" d="M73.85 85.97A22 22 0 0 1 56.55 75.98"/>
-    <path stroke="#5ec2c4" d="M75.0 86.0A22 22 0 0 1 55.95 75.0"/>
+    <path stroke="#38c6d0" stroke-linecap="round" d="M112 42H75A22 22 0 1 0 75 86A22 22 0 1 0 75 42"/>
+    <path stroke="#141414" stroke-width="17" d="M54.15 42.03A22 22 0 0 1 71.45 52.02"/>
+    <path stroke="#f25f7a" stroke-linecap="round" d="M16 86H53A22 22 0 1 0 53 42A22 22 0 1 0 53 86"/>
+    <path stroke="#141414" stroke-width="17" d="M73.85 85.97A22 22 0 0 1 56.55 75.98"/>
+    <path stroke="#38c6d0" d="M75.0 86.0A22 22 0 0 1 55.95 75.0"/>
   </g>
 </svg>

@@ -536,7 +536,7 @@ fn entry_summary(entry: &ListEntry) -> String {
 fn watch_mark<'a>(item: &LibraryItem) -> Element<'a, Msg> {
     match item.unplayed_count.filter(|c| *c > 0) {
         Some(count) => ui::badge_row(count.to_string(), theme::WATCH),
-        None if item.played => poster_mark(Icon::Check, theme::INK, theme::OK),
+        None if item.played => poster_mark(Icon::Check, theme::BG, theme::OK),
         None => Space::new().into(),
     }
 }
@@ -600,7 +600,7 @@ fn poster_card<'a>(app: &'a App, row_data: &'a LibraryRow, size: ViewSize) -> El
                     .width(width)
                     .padding(6)
                     .align_right(width),
-                container(track_mark(row_data, theme::alpha(theme::INK, 0.82)))
+                container(track_mark(row_data, theme::alpha(theme::BG, 0.82)))
                     .width(width)
                     .height(height)
                     .padding(6)
@@ -663,7 +663,7 @@ fn list_row<'a>(app: &'a App, row_data: &'a LibraryRow, size: ViewSize) -> Eleme
                 text(ui::ellipsize(overview, 220))
                     .size(theme::T_SMALL)
                     .line_height(1.45)
-                    .color(theme::alpha(theme::PAPER, 0.72)),
+                    .color(theme::alpha(theme::TEXT, 0.72)),
             )
             .max_width(720),
         );
@@ -677,7 +677,7 @@ fn list_row<'a>(app: &'a App, row_data: &'a LibraryRow, size: ViewSize) -> Eleme
         row![
             image,
             container(about).width(Fill),
-            row![track_mark(row_data, theme::RAISED), tracking]
+            row![track_mark(row_data, theme::HOVER), tracking]
                 .spacing(theme::S2)
                 .align_y(Center)
                 .width(LIST_TRACK_WIDTH),
@@ -820,7 +820,7 @@ fn episode_row<'a>(
     let (watched_color, watched_tip) = if episode.played {
         (theme::OK, "Mark as unwatched")
     } else {
-        (theme::FAINT, "Mark as watched")
+        (theme::TEXT_3, "Mark as watched")
     };
     let play = Msg::Play(item.clone(), Some(episode.id.clone()));
     row![
@@ -833,7 +833,7 @@ fn episode_row<'a>(
                 text(episode.number.to_string())
                     .size(theme::T_BODY)
                     .font(theme::DISPLAY)
-                    .color(theme::FAINT)
+                    .color(theme::TEXT_3)
                     .width(28),
                 text(ui::ellipsize(&episode.name, 70))
                     .size(theme::T_BODY)
@@ -849,7 +849,7 @@ fn episode_row<'a>(
                     ))
                     .size(theme::T_SMALL)
                     .line_height(1.45)
-                    .color(theme::MUTED),
+                    .color(theme::TEXT_2),
                 ]
                 .spacing(6)
             )
@@ -862,7 +862,7 @@ fn episode_row<'a>(
             ui::icon_button(
                 Icon::Play,
                 16.0,
-                theme::PAPER,
+                theme::TEXT,
                 Some(play),
                 "Play episode",
                 theme::ghost_button,
@@ -895,7 +895,7 @@ fn facts_line<'a>(rating: Option<f32>, facts: Vec<String>) -> Element<'a, Msg> {
                 text(format!("{rating:.1}"))
                     .size(theme::T_BODY)
                     .font(theme::SEMIBOLD)
-                    .color(theme::PAPER)
+                    .color(theme::TEXT)
             ]
             .spacing(5)
             .align_y(Center),
@@ -905,7 +905,7 @@ fn facts_line<'a>(rating: Option<f32>, facts: Vec<String>) -> Element<'a, Msg> {
         line = line.push(
             text(fact)
                 .size(theme::T_BODY)
-                .color(theme::alpha(theme::PAPER, 0.78)),
+                .color(theme::alpha(theme::TEXT, 0.78)),
         );
     }
     line.into()
@@ -989,7 +989,7 @@ fn anilist_summary<'a>(app: &'a App, item: &'a LibraryItem) -> Element<'a, Msg> 
         if mapping.is_some() {
             cord
         } else {
-            theme::FAINT
+            theme::TEXT_3
         },
     )]
     .spacing(theme::S3)
@@ -1088,8 +1088,8 @@ fn anilist_summary<'a>(app: &'a App, item: &'a LibraryItem) -> Element<'a, Msg> 
                     "Add to AniList"
                 },
                 (!detail.adding).then_some(Msg::AddToList(mapping.media_id)),
-                theme::track,
-                theme::INK,
+                theme::primary,
+                theme::BG,
             ));
     }
     actions = actions.push(ui::secondary(
@@ -1158,15 +1158,15 @@ pub fn detail_view(app: &App) -> Element<'_, Message> {
         ui::picture(&app.images, poster_key, 184, 276, want),
         column![
             text(ui::ellipsize(&item.name, 70))
-                .size(36)
-                .font(theme::DISPLAY_BOLD)
+                .size(theme::T_PAGE)
+                .font(theme::DISPLAY)
                 .line_height(1.15),
             facts_line(item.community_rating, facts),
             container(
                 text(ui::ellipsize(item.overview.as_deref().unwrap_or(""), 420))
                     .size(theme::T_BODY)
                     .line_height(1.5)
-                    .color(theme::alpha(theme::PAPER, 0.82))
+                    .color(theme::alpha(theme::TEXT, 0.82))
             )
             .max_width(720),
             row![
@@ -1174,13 +1174,13 @@ pub fn detail_view(app: &App) -> Element<'_, Message> {
                     Icon::Play,
                     play_label,
                     Msg::Play(item.clone(), next_episode),
-                    theme::watch_pill,
-                    theme::INK,
+                    theme::primary_pill,
+                    theme::BG,
                 ),
                 ui::icon_button(
                     Icon::CheckCircle,
                     20.0,
-                    if item.played { theme::OK } else { theme::PAPER },
+                    if item.played { theme::OK } else { theme::TEXT },
                     Some(Msg::SetPlayed(item.id.clone(), !item.played)),
                     if item.played {
                         "Mark as unwatched"
@@ -1213,7 +1213,7 @@ pub fn detail_view(app: &App) -> Element<'_, Message> {
             container(ui::icon_button(
                 Icon::ArrowBack,
                 20.0,
-                theme::PAPER,
+                theme::TEXT,
                 Some(Msg::CloseDetail),
                 "Back (Esc)",
                 theme::ghost_button,

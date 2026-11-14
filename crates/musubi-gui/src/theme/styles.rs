@@ -1,4 +1,9 @@
-//! Widget-Stile, ausschließlich aus den Werten in [`super::tokens`] gebaut.
+//! Widget styles, built from the values in [`super::tokens`] and nothing else.
+//!
+//! The look follows Kura: flat surfaces one step apart, hairline borders, no brand colour.
+//! A primary action is light text on a dark page turned around; everything else is
+//! outlined or bare. The cord colours only appear where a style takes one as a parameter
+//! or marks watching or tracking itself.
 
 use iced::overlay::menu;
 use iced::widget::{
@@ -28,31 +33,31 @@ fn white(a: f32) -> Color {
     alpha(Color::WHITE, a)
 }
 
-/// Schatten für alles, was über der Seite schwebt: Dialoge, Menüs, Hinweise.
+/// Shadow for what floats above the page: dialogs, menus, notices.
 fn floating() -> Shadow {
     Shadow {
-        color: Color::from_rgba(0.0, 0.0, 0.0, 0.45),
+        color: Color::from_rgba(0.0, 0.0, 0.0, 0.5),
         offset: Vector::new(0.0, 8.0),
-        blur_radius: 28.0,
+        blur_radius: 24.0,
     }
 }
 
-// Flächen -------------------------------------------------------------------------------
+// Surfaces ------------------------------------------------------------------------------
 
-/// Ruhige Fläche für Gruppen von Zeilen.
+/// Quiet surface for groups of rows.
 pub fn surface(_: &Theme) -> container::Style {
     container::Style {
         background: Some(SURFACE.into()),
-        border: outlined(LINE, R_MD),
+        border: outlined(LINE, RADIUS),
         ..container::Style::default()
     }
 }
 
-/// Fläche innerhalb einer Fläche, z. B. Kennzahlen.
+/// Surface inside a surface, e.g. key figures.
 pub fn inset(_: &Theme) -> container::Style {
     container::Style {
-        background: Some(RAISED.into()),
-        border: rounded(R_MD),
+        background: Some(HOVER.into()),
+        border: rounded(RADIUS),
         ..container::Style::default()
     }
 }
@@ -64,7 +69,7 @@ pub fn rail(_: &Theme) -> container::Style {
     }
 }
 
-/// Haarlinie als ein Pixel hoher oder breiter Container.
+/// Hairline, as a container one pixel high or wide.
 pub fn line(_: &Theme) -> container::Style {
     container::Style {
         background: Some(LINE.into()),
@@ -72,7 +77,7 @@ pub fn line(_: &Theme) -> container::Style {
     }
 }
 
-/// Vollfarbige Fläche, z. B. Markierungen und Balken.
+/// Solid area, e.g. marks and bars.
 pub fn solid(color: Color, radius: f32) -> impl Fn(&Theme) -> container::Style {
     move |_| container::Style {
         background: Some(color.into()),
@@ -83,37 +88,37 @@ pub fn solid(color: Color, radius: f32) -> impl Fn(&Theme) -> container::Style {
 
 pub fn placeholder(_: &Theme) -> container::Style {
     container::Style {
-        background: Some(RAISED.into()),
-        border: rounded(R_SM),
+        background: Some(SURFACE.into()),
+        border: rounded(R_COVER),
         ..container::Style::default()
     }
 }
 
-/// Kennzeichen auf Bildern: deckend, damit es auf jedem Poster lesbar bleibt.
+/// Mark on a picture: opaque, so it stays readable on any poster.
 pub fn badge(color: Color) -> impl Fn(&Theme) -> container::Style {
     move |_| container::Style {
         background: Some(color.into()),
-        text_color: Some(INK),
-        border: rounded(R_SM),
+        text_color: Some(BG),
+        border: rounded(PILL),
         ..container::Style::default()
     }
 }
 
-/// Kennzeichen im Text: getönt statt deckend.
+/// Mark in text: an outlined pill, tinted with its colour.
 pub fn tag(color: Color) -> impl Fn(&Theme) -> container::Style {
     move |_| container::Style {
-        background: Some(alpha(color, 0.14).into()),
+        background: Some(alpha(color, 0.10).into()),
         text_color: Some(color),
-        border: rounded(R_SM),
+        border: outlined(alpha(color, 0.35), PILL),
         ..container::Style::default()
     }
 }
 
-/// Halbtransparenter Streifen über einem Titelbild, links mit Kordelfarbe markiert.
+/// Half-transparent strip over a backdrop, edged in a cord colour.
 pub fn strip(cord: Color) -> impl Fn(&Theme) -> container::Style {
     move |_| container::Style {
-        background: Some(alpha(SURFACE, 0.72).into()),
-        border: outlined(alpha(cord, 0.35), R_MD),
+        background: Some(alpha(SURFACE, 0.78).into()),
+        border: outlined(alpha(cord, 0.35), RADIUS),
         ..container::Style::default()
     }
 }
@@ -121,7 +126,7 @@ pub fn strip(cord: Color) -> impl Fn(&Theme) -> container::Style {
 pub fn dialog(_: &Theme) -> container::Style {
     container::Style {
         background: Some(SURFACE.into()),
-        border: outlined(LINE_STRONG, R_LG),
+        border: outlined(LINE, R_PANEL),
         shadow: floating(),
         ..container::Style::default()
     }
@@ -129,9 +134,9 @@ pub fn dialog(_: &Theme) -> container::Style {
 
 pub fn toast(ok: bool) -> impl Fn(&Theme) -> container::Style {
     move |_| container::Style {
-        background: Some(OVERLAY.into()),
-        text_color: Some(PAPER),
-        border: outlined(alpha(if ok { TRACK } else { BAD }, 0.55), R_MD),
+        background: Some(HOVER.into()),
+        text_color: Some(TEXT),
+        border: outlined(if ok { LINE } else { alpha(BAD, 0.55) }, RADIUS),
         shadow: floating(),
         ..container::Style::default()
     }
@@ -139,14 +144,9 @@ pub fn toast(ok: bool) -> impl Fn(&Theme) -> container::Style {
 
 pub fn tooltip(_: &Theme) -> container::Style {
     container::Style {
-        background: Some(OVERLAY.into()),
-        text_color: Some(PAPER),
-        border: outlined(LINE_STRONG, R_SM),
-        shadow: Shadow {
-            color: Color::from_rgba(0.0, 0.0, 0.0, 0.4),
-            offset: Vector::new(0.0, 2.0),
-            blur_radius: 8.0,
-        },
+        background: Some(HOVER.into()),
+        text_color: Some(TEXT),
+        border: outlined(LINE, R_COVER),
         ..container::Style::default()
     }
 }
@@ -158,18 +158,18 @@ pub fn video(_: &Theme) -> container::Style {
     }
 }
 
-/// Dunkelt die Seite hinter einem Dialog ab.
 /// The page background at `opacity`, laid over a view that is fading in.
 pub fn veil(opacity: f32) -> impl Fn(&Theme) -> container::Style {
     move |_| container::Style {
-        background: (opacity > 0.0).then(|| alpha(INK, opacity).into()),
+        background: (opacity > 0.0).then(|| alpha(BG, opacity).into()),
         ..container::Style::default()
     }
 }
 
+/// Darkens the page behind a dialog.
 pub fn dim(_: &Theme) -> container::Style {
     container::Style {
-        background: Some(alpha(Color::from_rgb8(0x05, 0x08, 0x10), 0.72).into()),
+        background: Some(alpha(Color::BLACK, 0.72).into()),
         ..container::Style::default()
     }
 }
@@ -185,13 +185,13 @@ fn vertical(stops: &[(f32, Color)]) -> container::Style {
     }
 }
 
-/// Blendet ein Hintergrundbild nach unten in den Seitenhintergrund über.
+/// Fades a backdrop downwards into the page background.
 pub fn hero_fade(_: &Theme) -> container::Style {
     vertical(&[
-        (0.0, alpha(INK, 0.30)),
-        (0.45, alpha(INK, 0.55)),
-        (0.82, alpha(INK, 0.92)),
-        (1.0, INK),
+        (0.0, alpha(BG, 0.30)),
+        (0.45, alpha(BG, 0.55)),
+        (0.82, alpha(BG, 0.92)),
+        (1.0, BG),
     ])
 }
 
@@ -199,43 +199,41 @@ pub fn hero_fade(_: &Theme) -> container::Style {
 /// clear and the text at the bottom stays readable.
 pub fn hero_floor(_: &Theme) -> container::Style {
     vertical(&[
-        (0.0, alpha(INK, 0.18)),
-        (0.4, alpha(INK, 0.06)),
-        (0.68, alpha(INK, 0.52)),
-        (0.9, alpha(INK, 0.94)),
-        (1.0, INK),
+        (0.0, alpha(BG, 0.18)),
+        (0.4, alpha(BG, 0.06)),
+        (0.68, alpha(BG, 0.52)),
+        (0.9, alpha(BG, 0.94)),
+        (1.0, BG),
     ])
 }
 
-/// Dunkelt die linke Seite eines Hintergrundbilds ab, damit Text darauf lesbar ist.
+/// Darkens the left side of a backdrop, so text on it stays readable.
 pub fn hero_side(_: &Theme) -> container::Style {
     let linear = gradient::Linear::new(Radians(std::f32::consts::FRAC_PI_2))
-        .add_stop(0.0, alpha(INK, 0.86))
-        .add_stop(0.55, alpha(INK, 0.35))
-        .add_stop(1.0, alpha(INK, 0.0));
+        .add_stop(0.0, alpha(BG, 0.86))
+        .add_stop(0.55, alpha(BG, 0.35))
+        .add_stop(1.0, alpha(BG, 0.0));
     container::Style {
         background: Some(Background::Gradient(Gradient::Linear(linear))),
         ..container::Style::default()
     }
 }
 
-/// Verlauf hinter der oberen Leiste des Players.
+/// Gradient behind the player's top bar.
 pub fn scrim_top(_: &Theme) -> container::Style {
-    let dark = Color::from_rgba(0.0, 0.0, 0.0, 0.82);
     vertical(&[
-        (0.0, dark),
+        (0.0, alpha(Color::BLACK, 0.82)),
         (0.5, alpha(Color::BLACK, 0.38)),
         (1.0, Color::TRANSPARENT),
     ])
 }
 
-/// Verlauf hinter den Bedienelementen unten.
+/// Gradient behind the controls at the bottom.
 pub fn scrim_bottom(_: &Theme) -> container::Style {
-    let dark = Color::from_rgba(0.0, 0.0, 0.0, 0.82);
     vertical(&[
         (0.0, Color::TRANSPARENT),
         (0.5, alpha(Color::BLACK, 0.38)),
-        (1.0, dark),
+        (1.0, alpha(Color::BLACK, 0.82)),
     ])
 }
 
@@ -251,16 +249,6 @@ fn flat(background: Color, text_color: Color, border: Border) -> button::Style {
     }
 }
 
-/// Gefüllter Button in einer Kordelfarbe.
-fn filled(color: Color, status: button::Status, radius: f32) -> button::Style {
-    match status {
-        button::Status::Disabled => flat(RAISED, FAINT, rounded(radius)),
-        button::Status::Hovered => flat(mix(color, Color::WHITE, 0.14), INK, rounded(radius)),
-        button::Status::Pressed => flat(mix(color, INK, 0.16), INK, rounded(radius)),
-        button::Status::Active => flat(color, INK, rounded(radius)),
-    }
-}
-
 fn mix(a: Color, b: Color, t: f32) -> Color {
     Color {
         r: a.r + (b.r - a.r) * t,
@@ -270,96 +258,138 @@ fn mix(a: Color, b: Color, t: f32) -> Color {
     }
 }
 
-/// Hauptaktion rund ums Ansehen: Play, Resume.
-pub fn watch(_: &Theme, status: button::Status) -> button::Style {
-    filled(WATCH, status, R_MD)
-}
+/// How much a disabled control keeps of itself.
+const DISABLED: f32 = 0.4;
 
-/// Hauptaktion rund ums Verfolgen: speichern, hinzufügen, abgleichen.
-pub fn track(_: &Theme, status: button::Status) -> button::Style {
-    filled(TRACK, status, R_MD)
-}
-
-pub fn secondary(_: &Theme, status: button::Status) -> button::Style {
-    let border = outlined(LINE_STRONG, R_MD);
+/// The one filled button: the text colour as the surface, the page colour as the text.
+fn inverted(status: button::Status, radius: f32) -> button::Style {
     match status {
-        button::Status::Hovered => flat(OVERLAY, PAPER, border),
-        button::Status::Pressed => flat(RAISED, PAPER, border),
-        button::Status::Disabled => flat(Color::TRANSPARENT, FAINT, outlined(LINE, R_MD)),
-        button::Status::Active => flat(RAISED, PAPER, border),
+        button::Status::Disabled => flat(
+            alpha(TEXT, DISABLED),
+            BG,
+            outlined(Color::TRANSPARENT, radius),
+        ),
+        button::Status::Hovered | button::Status::Pressed => flat(
+            mix(TEXT, BG, 0.14),
+            BG,
+            outlined(mix(TEXT, BG, 0.14), radius),
+        ),
+        button::Status::Active => flat(TEXT, BG, outlined(TEXT, radius)),
     }
 }
 
-/// Unauffällige Aktion ohne Fläche.
+/// The main action of a view. There is one look for it, whichever service it belongs to.
+pub fn primary(_: &Theme, status: button::Status) -> button::Style {
+    inverted(status, RADIUS)
+}
+
+pub fn secondary(_: &Theme, status: button::Status) -> button::Style {
+    let border = outlined(LINE, RADIUS);
+    match status {
+        button::Status::Hovered | button::Status::Pressed => flat(HOVER, TEXT, border),
+        button::Status::Disabled => flat(Color::TRANSPARENT, alpha(TEXT, DISABLED), border),
+        button::Status::Active => flat(Color::TRANSPARENT, TEXT, border),
+    }
+}
+
+/// Unobtrusive action without a surface.
 pub fn quiet(_: &Theme, status: button::Status) -> button::Style {
     match status {
-        button::Status::Hovered | button::Status::Pressed => flat(RAISED, PAPER, rounded(R_MD)),
-        button::Status::Disabled => flat(Color::TRANSPARENT, FAINT, rounded(R_MD)),
-        button::Status::Active => flat(Color::TRANSPARENT, MUTED, rounded(R_MD)),
+        button::Status::Hovered | button::Status::Pressed => flat(HOVER, TEXT, rounded(RADIUS)),
+        button::Status::Disabled => {
+            flat(Color::TRANSPARENT, alpha(TEXT_2, DISABLED), rounded(RADIUS))
+        }
+        button::Status::Active => flat(Color::TRANSPARENT, TEXT_2, rounded(RADIUS)),
     }
 }
 
 pub fn danger(_: &Theme, status: button::Status) -> button::Style {
-    let border = outlined(alpha(BAD, 0.5), R_MD);
+    let border = outlined(alpha(BAD, 0.45), RADIUS);
     match status {
-        button::Status::Hovered | button::Status::Pressed => flat(BAD, INK, rounded(R_MD)),
-        _ => flat(alpha(BAD, 0.10), BAD, border),
+        button::Status::Hovered | button::Status::Pressed => flat(alpha(BAD, 0.14), BAD, border),
+        button::Status::Disabled => flat(Color::TRANSPARENT, alpha(BAD, DISABLED), border),
+        button::Status::Active => flat(Color::TRANSPARENT, BAD, border),
     }
 }
 
-/// Klickbare Karte: ohne Fläche, beim Überfahren leicht angehoben.
+/// An available update: the one place the info blue fills a button. Disabled, it is as
+/// quiet as any other disabled button, so "nothing to do" does not draw the eye.
+pub fn info(_: &Theme, status: button::Status) -> button::Style {
+    match status {
+        button::Status::Disabled => flat(
+            Color::TRANSPARENT,
+            alpha(TEXT, DISABLED),
+            outlined(LINE, RADIUS),
+        ),
+        button::Status::Hovered | button::Status::Pressed => flat(
+            mix(INFO, Color::WHITE, 0.12),
+            BG,
+            outlined(mix(INFO, Color::WHITE, 0.12), RADIUS),
+        ),
+        button::Status::Active => flat(INFO, BG, outlined(INFO, RADIUS)),
+    }
+}
+
+/// The small "Update" pill under the version: tinted, not filled, as in Kura.
+pub fn update_badge(_: &Theme, status: button::Status) -> button::Style {
+    let fill = match status {
+        button::Status::Hovered | button::Status::Pressed => 0.24,
+        _ => 0.14,
+    };
+    flat(alpha(INFO, fill), INFO, outlined(alpha(INFO, 0.45), PILL))
+}
+
+/// Clickable card: no surface, lifted slightly on hover.
 pub fn card_button(_: &Theme, status: button::Status) -> button::Style {
     match status {
-        button::Status::Hovered | button::Status::Pressed => flat(RAISED, PAPER, rounded(R_MD)),
-        _ => flat(Color::TRANSPARENT, PAPER, rounded(R_MD)),
+        button::Status::Hovered | button::Status::Pressed => flat(HOVER, TEXT, rounded(RADIUS)),
+        _ => flat(Color::TRANSPARENT, TEXT, rounded(RADIUS)),
     }
 }
 
-/// Klickbare Zeile in Listen.
+/// Clickable row in lists.
 pub fn row_button(_: &Theme, status: button::Status) -> button::Style {
     match status {
-        button::Status::Hovered | button::Status::Pressed => {
-            flat(alpha(PAPER, 0.05), PAPER, rounded(R_SM))
-        }
-        _ => flat(Color::TRANSPARENT, PAPER, rounded(R_SM)),
+        button::Status::Hovered | button::Status::Pressed => flat(HOVER, TEXT, rounded(RADIUS)),
+        _ => flat(Color::TRANSPARENT, TEXT, rounded(RADIUS)),
     }
 }
 
-/// Eintrag in der Seitenleiste. Die Kordelfarbe zeigt die Gruppe der aktiven Seite.
-pub fn nav_button(active: bool, cord: Color) -> impl Fn(&Theme, button::Status) -> button::Style {
+/// Entry in the sidebar.
+pub fn nav_button(active: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |_, status| match (active, status) {
-        (true, _) => flat(alpha(cord, 0.12), PAPER, rounded(R_MD)),
+        (true, _) => flat(HOVER, TEXT, rounded(RADIUS)),
         (false, button::Status::Hovered | button::Status::Pressed) => {
-            flat(alpha(PAPER, 0.05), PAPER, rounded(R_MD))
+            flat(Color::TRANSPARENT, TEXT, rounded(RADIUS))
         }
-        _ => flat(Color::TRANSPARENT, MUTED, rounded(R_MD)),
+        _ => flat(Color::TRANSPARENT, TEXT_2, rounded(RADIUS)),
     }
 }
 
-/// Reiter. Die Unterstreichung zeichnet `ui::tabs`.
+/// Tab. `ui::tabs` draws the underline.
 pub fn tab(active: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |_, status| {
         let color = match (active, status) {
-            (true, _) => PAPER,
-            (false, button::Status::Hovered | button::Status::Pressed) => PAPER,
-            _ => MUTED,
+            (true, _) => TEXT,
+            (false, button::Status::Hovered | button::Status::Pressed) => TEXT,
+            _ => TEXT_2,
         };
         flat(Color::TRANSPARENT, color, rounded(0.0))
     }
 }
 
-/// Auswahl-Chip, z. B. Filter.
+/// Choice chip, e.g. a filter. The active one carries its cord colour on the edge.
 pub fn chip(active: bool, cord: Color) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |_, status| match (active, status) {
-        (true, _) => flat(alpha(cord, 0.16), cord, outlined(alpha(cord, 0.5), PILL)),
+        (true, _) => flat(HOVER, TEXT, outlined(alpha(cord, 0.6), PILL)),
         (false, button::Status::Hovered | button::Status::Pressed) => {
-            flat(RAISED, PAPER, outlined(LINE_STRONG, PILL))
+            flat(HOVER, TEXT, outlined(LINE, PILL))
         }
-        _ => flat(Color::TRANSPARENT, MUTED, outlined(LINE_STRONG, PILL)),
+        _ => flat(Color::TRANSPARENT, TEXT_2, outlined(LINE, PILL)),
     }
 }
 
-/// Runder Icon-Button ohne Fläche, der beim Überfahren eine dezente Fläche bekommt.
+/// Round icon button over the video, with a faint surface on hover.
 pub fn icon_button(_: &Theme, status: button::Status) -> button::Style {
     let background = match status {
         button::Status::Hovered => white(0.14),
@@ -369,36 +399,34 @@ pub fn icon_button(_: &Theme, status: button::Status) -> button::Style {
     flat(background, ON_VIDEO, rounded(PILL))
 }
 
-/// Großer runder Wiedergabe-Button in der Bildmitte.
+/// Large round play button in the middle of the picture.
 pub fn play_button(_: &Theme, status: button::Status) -> button::Style {
-    let background = match status {
-        button::Status::Hovered | button::Status::Pressed => WATCH,
-        _ => Color::from_rgba(0.0, 0.0, 0.0, 0.45),
-    };
-    flat(background, ON_VIDEO, outlined(white(0.22), PILL))
-}
-
-/// Wiedergabe-Knopf auf einem Vorschaubild.
-pub fn play_overlay(_: &Theme, status: button::Status) -> button::Style {
-    let background = match status {
-        button::Status::Hovered | button::Status::Pressed => mix(WATCH, Color::WHITE, 0.14),
-        _ => WATCH,
-    };
-    flat(background, INK, rounded(PILL))
-}
-
-/// Hauptaktion mit Icon auf Titelbildern.
-pub fn watch_pill(_: &Theme, status: button::Status) -> button::Style {
-    filled(WATCH, status, PILL)
-}
-
-/// Icon-Button auf normalem Hintergrund, z. B. auf der Detailseite.
-pub fn ghost_button(_: &Theme, status: button::Status) -> button::Style {
-    let border = outlined(LINE_STRONG, PILL);
     match status {
-        button::Status::Hovered => flat(OVERLAY, PAPER, border),
-        button::Status::Pressed => flat(RAISED, PAPER, border),
-        _ => flat(alpha(SURFACE, 0.6), PAPER, border),
+        button::Status::Hovered | button::Status::Pressed => flat(TEXT, BG, outlined(TEXT, PILL)),
+        _ => flat(
+            alpha(Color::BLACK, 0.45),
+            ON_VIDEO,
+            outlined(white(0.22), PILL),
+        ),
+    }
+}
+
+/// Play button on a thumbnail.
+pub fn play_overlay(_: &Theme, status: button::Status) -> button::Style {
+    inverted(status, PILL)
+}
+
+/// Main action with an icon on backdrops.
+pub fn primary_pill(_: &Theme, status: button::Status) -> button::Style {
+    inverted(status, PILL)
+}
+
+/// Icon button on the normal background, e.g. on the detail page.
+pub fn ghost_button(_: &Theme, status: button::Status) -> button::Style {
+    let border = outlined(LINE, PILL);
+    match status {
+        button::Status::Hovered | button::Status::Pressed => flat(HOVER, TEXT, border),
+        _ => flat(alpha(SURFACE, 0.7), TEXT, border),
     }
 }
 
@@ -406,31 +434,23 @@ pub fn ghost_button(_: &Theme, status: button::Status) -> button::Style {
 /// artwork.
 pub fn count_up(_: &Theme, status: button::Status) -> button::Style {
     let ring = Border {
-        color: alpha(INK, 0.78),
+        color: alpha(BG, 0.78),
         width: 2.0,
         radius: PILL.into(),
     };
     let (background, text_color) = match status {
-        button::Status::Disabled => (mix(RAISED, INK, 0.2), FAINT),
-        button::Status::Hovered => (mix(TRACK, Color::WHITE, 0.22), INK),
-        button::Status::Pressed => (mix(TRACK, INK, 0.16), INK),
-        button::Status::Active => (TRACK, INK),
+        button::Status::Disabled => (HOVER, TEXT_3),
+        button::Status::Hovered => (mix(TRACK, Color::WHITE, 0.22), BG),
+        button::Status::Pressed => (mix(TRACK, BG, 0.16), BG),
+        button::Status::Active => (TRACK, BG),
     };
-    button::Style {
-        shadow: Shadow {
-            color: Color::from_rgba(0.0, 0.0, 0.0, 0.5),
-            offset: Vector::new(0.0, 2.0),
-            blur_radius: 8.0,
-        },
-        ..flat(background, text_color, ring)
-    }
+    flat(background, text_color, ring)
 }
 
 /// Frame around a segmented control such as the view switch.
 pub fn segmented(_: &Theme) -> container::Style {
     container::Style {
-        background: Some(INK.into()),
-        border: outlined(LINE_STRONG, R_MD),
+        border: outlined(LINE, RADIUS + 3.0),
         ..container::Style::default()
     }
 }
@@ -438,54 +458,52 @@ pub fn segmented(_: &Theme) -> container::Style {
 /// One option of a segmented control.
 pub fn segment(active: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |_, status| match (active, status) {
-        (true, _) => flat(OVERLAY, PAPER, rounded(R_SM)),
+        (true, _) => flat(HOVER, TEXT, rounded(RADIUS)),
         (false, button::Status::Hovered | button::Status::Pressed) => {
-            flat(RAISED, PAPER, rounded(R_SM))
+            flat(Color::TRANSPARENT, TEXT, rounded(RADIUS))
         }
-        _ => flat(Color::TRANSPARENT, MUTED, rounded(R_SM)),
+        _ => flat(Color::TRANSPARENT, TEXT_2, rounded(RADIUS)),
     }
 }
 
-// Eingaben ------------------------------------------------------------------------------
+// Inputs --------------------------------------------------------------------------------
 
 pub fn input(_: &Theme, status: text_input::Status) -> text_input::Style {
     let border = match status {
-        text_input::Status::Focused { .. } => TRACK,
-        text_input::Status::Hovered => alpha(PAPER, 0.28),
-        _ => LINE_STRONG,
+        text_input::Status::Focused { .. } | text_input::Status::Hovered => TEXT_3,
+        _ => LINE,
     };
     text_input::Style {
-        background: INK.into(),
-        border: outlined(border, R_MD),
-        icon: MUTED,
-        placeholder: FAINT,
-        value: PAPER,
-        selection: alpha(TRACK, 0.35),
+        background: SURFACE.into(),
+        border: outlined(border, RADIUS),
+        icon: TEXT_2,
+        placeholder: TEXT_3,
+        value: TEXT,
+        selection: alpha(TEXT, 0.22),
     }
 }
 
 pub fn pick(_: &Theme, status: pick_list::Status) -> pick_list::Style {
-    let (background, border) = match status {
-        pick_list::Status::Active => (RAISED, LINE_STRONG),
-        pick_list::Status::Hovered => (OVERLAY, LINE_STRONG),
-        pick_list::Status::Opened { .. } => (OVERLAY, TRACK),
+    let border = match status {
+        pick_list::Status::Active => LINE,
+        pick_list::Status::Hovered | pick_list::Status::Opened { .. } => TEXT_3,
     };
     pick_list::Style {
-        text_color: PAPER,
-        placeholder_color: FAINT,
-        handle_color: MUTED,
-        background: background.into(),
-        border: outlined(border, R_MD),
+        text_color: TEXT,
+        placeholder_color: TEXT_3,
+        handle_color: TEXT_2,
+        background: SURFACE.into(),
+        border: outlined(border, RADIUS),
     }
 }
 
 pub fn pick_menu(_: &Theme) -> menu::Style {
     menu::Style {
-        background: OVERLAY.into(),
-        border: outlined(LINE_STRONG, R_MD),
-        text_color: PAPER,
-        selected_text_color: INK,
-        selected_background: TRACK.into(),
+        background: SURFACE.into(),
+        border: outlined(LINE, RADIUS),
+        text_color: TEXT_2,
+        selected_text_color: TEXT,
+        selected_background: HOVER.into(),
         shadow: floating(),
     }
 }
@@ -497,25 +515,25 @@ pub fn toggle(_: &Theme, status: toggler::Status) -> toggler::Style {
         toggler::Status::Disabled { is_toggled } => (is_toggled, false),
     };
     let background = match (on, hovered) {
-        (true, false) => TRACK,
-        (true, true) => mix(TRACK, Color::WHITE, 0.14),
-        (false, false) => OVERLAY,
-        (false, true) => mix(OVERLAY, PAPER, 0.12),
+        (true, false) => TEXT,
+        (true, true) => mix(TEXT, BG, 0.14),
+        (false, false) => LINE,
+        (false, true) => mix(LINE, TEXT, 0.12),
     };
     toggler::Style {
         background: background.into(),
         background_border_width: 0.0,
         background_border_color: Color::TRANSPARENT,
-        foreground: if on { INK } else { MUTED }.into(),
+        foreground: if on { BG } else { TEXT_2 }.into(),
         foreground_border_width: 0.0,
         foreground_border_color: Color::TRANSPARENT,
-        text_color: Some(PAPER),
+        text_color: Some(TEXT),
         border_radius: None,
         padding_ratio: 0.18,
     }
 }
 
-/// Schmale Scrollleiste, die erst beim Überfahren deutlich wird.
+/// Narrow scrollbar that only becomes distinct on hover.
 pub fn scroll(_: &Theme, status: scrollable::Status) -> scrollable::Style {
     let (engaged, idle) = match status {
         scrollable::Status::Active {
@@ -536,7 +554,7 @@ pub fn scroll(_: &Theme, status: scrollable::Status) -> scrollable::Style {
         ),
         scrollable::Status::Dragged { .. } => (true, false),
     };
-    // Passt der Inhalt ganz in den Bereich, bleibt die Leiste unsichtbar.
+    // When the content fits, the bar stays invisible.
     let strength = match (idle, engaged) {
         (true, _) => 0.0,
         (false, true) => 0.38,
@@ -546,7 +564,7 @@ pub fn scroll(_: &Theme, status: scrollable::Status) -> scrollable::Style {
         background: None,
         border: rounded(PILL),
         scroller: scrollable::Scroller {
-            background: alpha(PAPER, strength).into(),
+            background: alpha(TEXT, strength).into(),
             border: rounded(PILL),
         },
     };
@@ -556,20 +574,20 @@ pub fn scroll(_: &Theme, status: scrollable::Status) -> scrollable::Style {
         horizontal_rail: rail,
         gap: None,
         auto_scroll: scrollable::AutoScroll {
-            background: OVERLAY.into(),
-            border: outlined(LINE_STRONG, PILL),
+            background: HOVER.into(),
+            border: outlined(LINE, PILL),
             shadow: Shadow::default(),
-            icon: PAPER,
+            icon: TEXT,
         },
     }
 }
 
-/// Fortschritt in einer Kordelfarbe auf dunkler Spur.
+/// Progress in a cord colour on a dark track.
 pub fn progress(color: Color) -> impl Fn(&Theme) -> progress_bar::Style {
     move |_| progress_bar::Style {
-        background: alpha(Color::from_rgb8(0x05, 0x08, 0x10), 0.6).into(),
+        background: LINE.into(),
         bar: color.into(),
-        border: rounded(0.0),
+        border: rounded(PILL),
     }
 }
 
@@ -592,7 +610,7 @@ fn slider_track(status: slider::Status, fill: Color, thin: f32, thick: f32) -> s
     }
 }
 
-/// Fortschrittsleiste: schmal, beim Überfahren dicker mit sichtbarem Griff.
+/// Seek bar: narrow, thicker with a visible handle on hover.
 pub fn seek_slider(_: &Theme, status: slider::Status) -> slider::Style {
     slider_track(status, WATCH, 4.0, 6.0)
 }
@@ -601,17 +619,17 @@ pub fn volume_slider(_: &Theme, status: slider::Status) -> slider::Style {
     slider_track(status, Color::WHITE, 3.0, 4.0)
 }
 
-/// Regler in Formularen.
+/// Slider in forms.
 pub fn form_slider(_: &Theme, _: slider::Status) -> slider::Style {
     slider::Style {
         rail: slider::Rail {
-            backgrounds: (TRACK.into(), OVERLAY.into()),
+            backgrounds: (TEXT.into(), LINE.into()),
             width: 4.0,
             border: rounded(2.0),
         },
         handle: slider::Handle {
             shape: slider::HandleShape::Circle { radius: 8.0 },
-            background: PAPER.into(),
+            background: TEXT.into(),
             border_width: 0.0,
             border_color: Color::TRANSPARENT,
         },

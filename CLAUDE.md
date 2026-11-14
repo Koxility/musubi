@@ -12,7 +12,7 @@ Read `docs/ARCHITECTURE.md` before changing how crates fit together, and `docs/D
 
 - Crate dependencies point downwards only (diagram in `docs/ARCHITECTURE.md`). `musubi-domain` stays plain types without I/O.
 - The GUI talks to `Core` and nothing else. A feature the GUI needs gets a typed method or `CoreEvent` in `musubi-core` first; the GUI never does HTTP, SQL or file I/O itself.
-- In `musubi-gui`, each page owns its `State`, `Msg`, `update` and `view`; `app.rs` wires them. Styling comes from the tokens and styles in `theme/` and the components in `ui.rs`, never from literal colours or sizes. Red (`WATCH`) means Jellyfin/watching, teal (`TRACK`) means AniList/tracking.
+- In `musubi-gui`, each page owns its `State`, `Msg`, `update` and `view`; `app.rs` wires them. Styling comes from the tokens and styles in `theme/` and the components in `ui.rs`, never from literal colours or sizes. The neutral tokens, state colours, radius and type sizes mirror Kura's `tokens.css`; keep them in step. Red (`WATCH`) means Jellyfin/watching, teal (`TRACK`) means AniList/tracking; they mark things and never colour buttons or large areas. Blue (`INFO`) is for updates only.
 - Icons are SVG strings in `icons.rs`; each SVG attribute may appear only once or resvg drops the icon.
 - Keep the `view_epoch` nesting trick in `app.rs` and use `column`, not `keyed_column` (Iced 0.14 panics on page changes).
 

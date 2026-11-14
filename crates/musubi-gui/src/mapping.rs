@@ -516,7 +516,7 @@ fn mapped_title<'a>(app: &'a App, id: &'a str, mappings: Vec<&'a Mapping>) -> El
 
 fn unmatched_row(item: &LibraryItem) -> Element<'_, Msg> {
     row![
-        ui::icon(Icon::Link, 18.0, theme::FAINT),
+        ui::icon(Icon::Link, 18.0, theme::TEXT_3),
         text(ui::ellipsize(&item.name, 80))
             .size(theme::T_BODY)
             .font(theme::MEDIUM)
@@ -553,7 +553,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
             "Match again",
             Some(Msg::MatchAgain),
             theme::secondary,
-            theme::PAPER
+            theme::TEXT
         )],
     )]
     .spacing(theme::S5)
@@ -684,7 +684,7 @@ fn change_body<'a>(app: &'a App, view: ChangeView<'a>) -> Column<'a, Msg> {
         text(name)
             .size(theme::T_SMALL)
             .font(theme::SEMIBOLD)
-            .color(theme::PAPER)
+            .color(theme::TEXT)
     };
     let mut body = column![].spacing(theme::S3);
     if view.seasons.len() > 1 || view.scope.0.is_some() {

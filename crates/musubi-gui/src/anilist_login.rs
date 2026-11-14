@@ -135,7 +135,7 @@ fn advanced(state: &State) -> Element<'_, Msg> {
             container(
                 text(&state.redirect)
                     .size(theme::T_SMALL)
-                    .color(theme::MUTED)
+                    .color(theme::TEXT_2)
             )
             .padding([9, 10])
             .width(Fill)
@@ -164,7 +164,7 @@ pub fn view(state: &State, logged_in: bool) -> Element<'_, Msg> {
             ui::icon(Icon::Clock, 16.0, theme::TRACK),
             text("Waiting for you to approve Musubi in the browser…")
                 .size(theme::T_SMALL)
-                .color(theme::PAPER),
+                .color(theme::TEXT),
             ui::secondary("Cancel", Msg::Cancel),
         ]
         .spacing(theme::S2)
@@ -180,8 +180,8 @@ pub fn view(state: &State, logged_in: bool) -> Element<'_, Msg> {
             Icon::External,
             label,
             Some(Msg::Start),
-            theme::track,
-            theme::INK
+            theme::primary,
+            theme::BG
         )]
         .into()
     };

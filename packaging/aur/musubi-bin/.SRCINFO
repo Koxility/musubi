@@ -17,6 +17,7 @@ pkgbase = musubi-bin
 	depends = gst-libav
 	depends = hicolor-icon-theme
 	depends = libxkbcommon
+	depends = libxkbcommon-x11
 	depends = wayland
 	optdepends = org.freedesktop.secrets: keep login tokens in the desktop keyring (KWallet, GNOME Keyring)
 	optdepends = gst-plugin-va: hardware video decoding through VA-API
@@ -26,6 +27,6 @@ pkgbase = musubi-bin
 	options = !strip
 	options = !debug
 	source = https://github.com/Koxility/musubi/releases/download/v0.4.2/musubi-0.4.2-x86_64-linux.tar.gz
-	sha256sums = SKIP
+	sha256sums = 9702035af9b43b86f941aac158fbea5e7cbb3ddcd31a2a605c2338d93567116b
 
 pkgname = musubi-bin

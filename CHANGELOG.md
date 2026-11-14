@@ -4,6 +4,27 @@ All notable changes to Musubi are documented here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-14
+
+### Added
+
+- **Update check.** At every start Musubi asks GitHub whether a newer release is out. When there is one, a small blue *Update* pill appears under the version in the sidebar and the *Update* button at the bottom of Settings becomes active; without one the button stays greyed out.
+- **Update from inside the app.** The button updates Musubi the way it was installed. A copy installed with `install.sh` downloads the release, checks its checksum and replaces itself; a restart finishes it. A copy installed as an Arch package opens a terminal and rebuilds the package with `makepkg -si` from the project's PKGBUILD, and is only offered a version once that PKGBUILD has it. Any other copy gets the release page.
+
+### Changed
+
+- **A new look, shared with Kura.** Near-black neutral surfaces with hairline borders, the Geist typeface (Geist Mono for versions), one 8px radius, lighter icons and a slimmer sidebar. Primary buttons are light on dark instead of red or teal. Every page shows the same content and actions as before.
+- **Red and teal mark, they no longer fill.** Red still means watching on Jellyfin and teal tracking on AniList, now as progress bars, connection dots, tags, the active page and the `+1` pill.
+- The logo and launcher icon use the new colours.
+
+### Fixed
+
+- **`install.sh` rejects an empty `--prefix`** instead of installing into `/bin` and `/share`.
+- **An install folder with spaces works.** The launcher entry that `install.sh` writes now quotes the path to Musubi, so a prefix with spaces or other special characters starts the app.
+- **The Arch packages verify their downloads.** Both PKGBUILDs carry the real checksums of the release they describe, and a release can no longer be packed while one of them has its check switched off.
+- Packing a release at the same time in two places no longer risks a half-written archive.
+- **The Arch packages start under X11.** They now depend on `libxkbcommon-x11`, without which Musubi crashed at start in an X11 session.
+
 ## [0.4.2] - 2026-11-13
 
 ### Added
@@ -127,6 +148,7 @@ First release.
 - Playback needs GStreamer with `gst-plugins-base`, `-good`, `-bad` and `gst-libav`.
 - You need your own AniList client ID; see the README.
 
+[0.5.0]: https://github.com/Koxility/musubi/releases/tag/v0.5.0
 [0.4.2]: https://github.com/Koxility/musubi/releases/tag/v0.4.2
 [0.4.1]: https://github.com/Koxility/musubi/releases/tag/v0.4.1
 [0.4.0]: https://github.com/Koxility/musubi/releases/tag/v0.4.0

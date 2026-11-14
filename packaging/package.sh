@@ -33,23 +33,42 @@ if [ -z "$(printf '%s' "$notes" | tr -d '[:space:]')" ]; then
     exit 1
 fi
 
+# A PKGBUILD without checksums must not reach a release.
+if grep -q "SKIP" packaging/aur/*/PKGBUILD; then
+    echo "A PKGBUILD in packaging/aur/ has a checksum set to SKIP" >&2
+    exit 1
+fi
+
 name="musubi-$version-x86_64-linux"
-rm -rf dist
-mkdir -p "dist/$name"
-install -m755 target/release/musubi "dist/$name/musubi"
-install -m755 packaging/install.sh "dist/$name/install.sh"
+# Everything is built in a directory of this run and then renamed into dist/. A rename
+# within one file system is atomic, so runs at the same time never see or leave a
+# half-written archive, in particular not under the version-less name they share.
+mkdir -p dist
+stage=$(mktemp -d dist/.stage.XXXXXX)
+trap 'rm -rf "$stage"' EXIT
+mkdir "$stage/$name"
+install -m755 target/release/musubi "$stage/$name/musubi"
+install -m755 packaging/install.sh "$stage/$name/install.sh"
 install -m644 packaging/musubi.desktop packaging/musubi.svg \
-    README.md CHANGELOG.md LICENSE "dist/$name/"
+    README.md CHANGELOG.md LICENSE "$stage/$name/"
 # The binary embeds these fonts; their licence asks to ship its text along.
-install -m644 crates/musubi-gui/fonts/Sora-OFL.txt \
-    crates/musubi-gui/fonts/HankenGrotesk-OFL.txt "dist/$name/"
-tar -C dist -czf "dist/$name.tar.gz" "$name"
-cp "dist/$name.tar.gz" dist/musubi-x86_64-linux.tar.gz
+install -m644 crates/musubi-gui/fonts/*-OFL.txt "$stage/$name/"
+tar -C "$stage" -czf "$stage/$name.tar.gz" "$name"
+cp "$stage/$name.tar.gz" "$stage/musubi-x86_64-linux.tar.gz"
 (
-    cd dist
+    cd "$stage"
     sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
     sha256sum musubi-x86_64-linux.tar.gz > musubi-x86_64-linux.tar.gz.sha256
 )
-printf '%s\n' "$notes" | sed -e '/./,$!d' > dist/notes.md
+printf '%s\n' "$notes" | sed -e '/./,$!d' > "$stage/notes.md"
+# One run at a time publishes, so an archive never ends up next to the checksum of
+# another run's archive.
+exec 9> dist/.lock
+flock 9
+for file in "$name.tar.gz" "$name.tar.gz.sha256" musubi-x86_64-linux.tar.gz \
+    musubi-x86_64-linux.tar.gz.sha256 notes.md; do
+    mv -f "$stage/$file" "dist/$file"
+done
+exec 9>&-
 
 echo "dist/$name.tar.gz"

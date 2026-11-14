@@ -19,6 +19,7 @@ depends=(
   'gst-libav'
   'hicolor-icon-theme'
   'libxkbcommon'
+  'libxkbcommon-x11'
   'wayland'
 )
 makedepends=('cargo')
@@ -32,7 +33,7 @@ optdepends=(
 # strips the binary, so a debug package would be empty.
 options=('!lto' '!debug')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('SKIP')
+sha256sums=('d67ac8ea668658ebab1b11b7378e5512c3fbec4758884e1f7585928e12115a55')
 
 prepare() {
   cd "$pkgname-$pkgver"
@@ -60,6 +61,7 @@ package() {
   install -Dm644 packaging/musubi.desktop -t "$pkgdir/usr/share/applications/"
   install -Dm644 packaging/musubi.svg -t "$pkgdir/usr/share/icons/hicolor/scalable/apps/"
   install -Dm644 README.md CHANGELOG.md -t "$pkgdir/usr/share/doc/$pkgname/"
-  install -Dm644 LICENSE crates/musubi-gui/fonts/{Sora,HankenGrotesk}-OFL.txt \
+  # The binary embeds fonts under the OFL; which ones differs between versions.
+  install -Dm644 LICENSE crates/musubi-gui/fonts/*-OFL.txt \
     -t "$pkgdir/usr/share/licenses/$pkgname/"
 }

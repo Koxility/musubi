@@ -279,7 +279,7 @@ fn remaining(item: &ShelfItem) -> Option<String> {
 fn play_overlay<'a>(item: &ShelfItem, size: (f32, f32)) -> Element<'a, Msg> {
     center(
         button(
-            center(ui::icon(Icon::Play, 26.0, theme::INK))
+            center(ui::icon(Icon::Play, 26.0, theme::BG))
                 .width(58)
                 .height(58),
         )
@@ -308,7 +308,7 @@ fn wide_card<'a>(app: &'a App, item: &ShelfItem) -> Element<'a, Msg> {
                 text(ui::ellipsize(&item.title, 40))
                     .size(theme::T_CARD)
                     .font(theme::SEMIBOLD),
-                text(detail).size(theme::T_SMALL).color(theme::MUTED),
+                text(detail).size(theme::T_SMALL).color(theme::TEXT_2),
             ]
             .spacing(3),
         ]
@@ -366,14 +366,14 @@ fn hero<'a>(app: &'a App, item: &'a ShelfItem, reason: &'a str, height: f32) -> 
             text(ui::ellipsize(subtitle, 60))
                 .size(theme::T_TITLE)
                 .font(theme::MEDIUM)
-                .color(theme::PAPER),
+                .color(theme::TEXT),
         );
     }
     if let Some(left) = remaining(item) {
         meta = meta.push(
             text(left)
                 .size(theme::T_BODY)
-                .color(theme::alpha(theme::PAPER, 0.7)),
+                .color(theme::alpha(theme::TEXT, 0.7)),
         );
     }
     let mut info = column![
@@ -381,7 +381,7 @@ fn hero<'a>(app: &'a App, item: &'a ShelfItem, reason: &'a str, height: f32) -> 
         container(
             text(ui::ellipsize(&item.title, 70))
                 .size(theme::T_HERO)
-                .font(theme::DISPLAY_BOLD)
+                .font(theme::DISPLAY)
                 .line_height(1.1)
         )
         .max_width(760),
@@ -396,7 +396,7 @@ fn hero<'a>(app: &'a App, item: &'a ShelfItem, reason: &'a str, height: f32) -> 
                 text(ui::ellipsize(overview, 260))
                     .size(theme::T_CARD)
                     .line_height(1.5)
-                    .color(theme::alpha(theme::PAPER, 0.86)),
+                    .color(theme::alpha(theme::TEXT, 0.86)),
             )
             .max_width(620),
         );
