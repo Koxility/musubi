@@ -10,9 +10,9 @@ use musubi_core::domain::{
     resolve_episode,
 };
 use musubi_core::{
-    Config, Core, CoreError, CoreEvent, CoreOptions, EndReason, MatchOutcome, OpenRequest, Paths,
-    PlayItem, PlayerBackend, PlayerCommand, PlayerError, PlayerEvent, PlayerSession, Service,
-    SessionHandle, SyncDirection,
+    Config, Core, CoreError, CoreEvent, CoreOptions, EndReason, InstallKind, MatchOutcome,
+    OpenRequest, Paths, PlayItem, PlayerBackend, PlayerCommand, PlayerError, PlayerEvent,
+    PlayerSession, Service, SessionHandle, SyncDirection, UpdateOutcome, Version,
 };
 use secrecy::ExposeSecret;
 use secrecy::SecretString;
@@ -146,6 +146,7 @@ async fn core_with_player(
     let options = CoreOptions {
         anilist_endpoint: Some(anilist.uri()),
         player,
+        ..CoreOptions::default()
     };
     Core::open(paths, options).await.unwrap()
 }
@@ -1293,4 +1294,216 @@ async fn new_matching_rules_get_one_go_at_titles_left_without_a_match() {
     core.unmap("s1").await.unwrap();
     core.match_all(false).await.unwrap();
     assert!(core.mappings_for("s1").await.unwrap().is_empty());
+}
+
+/// A core that asks `github` about updates and takes itself to be installed as `install`.
+async fn update_core(root: &Path, github: &MockServer, install: InstallKind) -> Core {
+    let paths = Paths::under(&root.join("profile")).unwrap();
+    Config::default().save(&paths.config_file()).unwrap();
+    let options = CoreOptions {
+        update_endpoint: Some(github.uri()),
+        install_kind: Some(install),
+        ..CoreOptions::default()
+    };
+    Core::open(paths, options).await.unwrap()
+}
+
+async fn mock_release(github: &MockServer, release: Value) {
+    Mock::given(method("GET"))
+        .and(path("/releases/latest"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(release))
+        .mount(github)
+        .await;
+}
+
+fn release(tag: &str) -> Value {
+    json!({
+        "tag_name": tag,
+        "html_url": format!("https://example.org/releases/{tag}"),
+        "assets": [],
+    })
+}
+
+#[tokio::test]
+async fn only_a_newer_release_counts_as_an_update() {
+    let dir = tempfile::tempdir().unwrap();
+    let current = Version::current().to_string();
+    for (tag, expected) in [
+        ("v99.0.0", Some("99.0.0")),
+        (&*format!("v{current}"), None),
+        ("v0.0.1", None),
+        ("nightly", None),
+    ] {
+        let github = MockServer::start().await;
+        mock_release(&github, release(tag)).await;
+        let core = update_core(dir.path(), &github, InstallKind::Other).await;
+
+        let update = core.check_for_update().await.unwrap();
+
+        assert_eq!(
+            update.as_ref().map(|u| u.version.to_string()).as_deref(),
+            expected,
+            "{tag}"
+        );
+        if let Some(update) = update {
+            assert_eq!(update.page, "https://example.org/releases/v99.0.0");
+            // Nothing can be installed for an unknown kind of copy: the user gets the page.
+            assert_eq!(
+                core.install_update(&update).await.unwrap(),
+                UpdateOutcome::Manual {
+                    command: None,
+                    page: update.page.clone()
+                }
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_failing_update_check_is_an_error_not_an_update() {
+    let dir = tempfile::tempdir().unwrap();
+    let github = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/releases/latest"))
+        .respond_with(ResponseTemplate::new(503))
+        .mount(&github)
+        .await;
+    let core = update_core(dir.path(), &github, InstallKind::Other).await;
+
+    assert!(matches!(
+        core.check_for_update().await,
+        Err(CoreError::Download(_))
+    ));
+}
+
+#[tokio::test]
+async fn a_pacman_copy_waits_for_its_pkgbuild() {
+    let dir = tempfile::tempdir().unwrap();
+    let pacman = || InstallKind::Pacman {
+        package: "musubi-bin".to_owned(),
+    };
+    for (pkgver, expected) in [("0.0.1", None), ("99.0.0", Some("99.0.0"))] {
+        let github = MockServer::start().await;
+        mock_release(&github, release("v99.0.0")).await;
+        Mock::given(method("GET"))
+            .and(path("/aur/musubi-bin/PKGBUILD"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(format!("pkgname=musubi-bin\npkgver={pkgver}\npkgrel=1\n")),
+            )
+            .mount(&github)
+            .await;
+        let core = update_core(dir.path(), &github, pacman()).await;
+
+        let update = core.check_for_update().await.unwrap();
+
+        assert_eq!(
+            update.map(|u| u.version.to_string()).as_deref(),
+            expected,
+            "{pkgver}"
+        );
+    }
+}
+
+/// Packs a release archive whose `install.sh` only records the prefix it was given, and
+/// serves it with `checksum` as its published checksum (`None` for the real one).
+async fn mock_archive(root: &Path, github: &MockServer, checksum: Option<&str>) {
+    let name = "musubi-99.0.0-x86_64-linux";
+    let tree = root.join("tree").join(name);
+    std::fs::create_dir_all(&tree).unwrap();
+    std::fs::write(
+        tree.join("install.sh"),
+        "#!/bin/sh\nset -eu\n[ \"$1\" = --prefix ]\nmkdir -p \"$2\"\necho new > \"$2/installed\"\n",
+    )
+    .unwrap();
+    let archive = root.join("archive.tar.gz");
+    let run = |program: &str, args: &[&std::ffi::OsStr]| {
+        let output = std::process::Command::new(program)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{program} failed");
+        String::from_utf8(output.stdout).unwrap()
+    };
+    run(
+        "tar",
+        &[
+            "-czf".as_ref(),
+            archive.as_ref(),
+            "-C".as_ref(),
+            root.join("tree").as_ref(),
+            name.as_ref(),
+        ],
+    );
+    let real = run("sha256sum", &[archive.as_ref()]);
+    let real = real.split_whitespace().next().unwrap().to_owned();
+    let file = format!("{name}.tar.gz");
+    mock_release(
+        github,
+        json!({
+            "tag_name": "v99.0.0",
+            "html_url": "https://example.org/releases/v99.0.0",
+            "assets": [
+                { "name": file, "browser_download_url": format!("{}/dl/{file}", github.uri()) },
+                {
+                    "name": format!("{file}.sha256"),
+                    "browser_download_url": format!("{}/dl/{file}.sha256", github.uri()),
+                },
+            ],
+        }),
+    )
+    .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/dl/{file}")))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(std::fs::read(&archive).unwrap()))
+        .mount(github)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/dl/{file}.sha256")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(format!("{}  {file}\n", checksum.unwrap_or(&real))),
+        )
+        .mount(github)
+        .await;
+}
+
+#[tokio::test]
+async fn a_script_install_updates_itself_from_the_release_archive() {
+    let dir = tempfile::tempdir().unwrap();
+    let github = MockServer::start().await;
+    mock_archive(dir.path(), &github, None).await;
+    // A prefix with a space, as install.sh has to cope with.
+    let prefix = dir.path().join("my apps");
+    let install = InstallKind::Script {
+        prefix: prefix.clone(),
+    };
+    let core = update_core(dir.path(), &github, install).await;
+
+    let update = core.check_for_update().await.unwrap().expect("an update");
+    let outcome = core.install_update(&update).await.unwrap();
+
+    assert_eq!(outcome, UpdateOutcome::Installed);
+    assert_eq!(
+        std::fs::read_to_string(prefix.join("installed")).unwrap(),
+        "new\n"
+    );
+}
+
+#[tokio::test]
+async fn an_archive_that_fails_its_checksum_is_not_installed() {
+    let dir = tempfile::tempdir().unwrap();
+    let github = MockServer::start().await;
+    mock_archive(dir.path(), &github, Some(&"0".repeat(64))).await;
+    let prefix = dir.path().join("prefix");
+    let install = InstallKind::Script {
+        prefix: prefix.clone(),
+    };
+    let core = update_core(dir.path(), &github, install).await;
+
+    let update = core.check_for_update().await.unwrap().expect("an update");
+    let result = core.install_update(&update).await;
+
+    assert!(matches!(result, Err(CoreError::Update(_))), "{result:?}");
+    assert!(!prefix.join("installed").exists());
 }

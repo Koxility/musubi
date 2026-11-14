@@ -166,10 +166,12 @@ fn core_options(player: Option<Arc<dyn PlayerBackend>>) -> CoreOptions {
         player,
         ..CoreOptions::default()
     };
-    // Nur in Debug-Builds: Release-Builds senden das Token ausschließlich an AniList.
+    // Debug builds only: release builds send the token to AniList alone and ask GitHub
+    // alone about updates.
     #[cfg(debug_assertions)]
     {
         options.anilist_endpoint = std::env::var("MUSUBI_DEV_ANILIST_ENDPOINT").ok();
+        options.update_endpoint = std::env::var("MUSUBI_DEV_UPDATE_ENDPOINT").ok();
     }
     #[cfg(not(debug_assertions))]
     let _ = &mut options;

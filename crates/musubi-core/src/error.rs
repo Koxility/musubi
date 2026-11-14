@@ -37,6 +37,8 @@ pub enum CoreError {
     Io(#[from] std::io::Error),
     #[error("download failed: {0}")]
     Download(#[from] reqwest::Error),
+    #[error("update failed: {0}")]
+    Update(String),
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;

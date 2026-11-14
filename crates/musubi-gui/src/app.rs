@@ -846,11 +846,7 @@ mod tests {
     use musubi_core::{CoreOptions, Paths};
 
     async fn app(dir: &std::path::Path) -> App {
-        let options = CoreOptions {
-            anilist_endpoint: None,
-            player: None,
-        };
-        let core = Core::open(Paths::under(dir).unwrap(), options)
+        let core = Core::open(Paths::under(dir).unwrap(), CoreOptions::default())
             .await
             .unwrap();
         App::boot(core, None).0

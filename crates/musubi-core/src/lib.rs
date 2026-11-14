@@ -13,6 +13,7 @@ mod outbox;
 mod playback;
 pub mod sync;
 mod sync_ops;
+mod updates;
 
 pub use error::{CoreError, Result, Service};
 pub use events::{CoreEvent, PlaybackState};
@@ -21,6 +22,7 @@ pub use library::{EpisodeRow, HomeShelves, LibraryRow};
 pub use mapping_ops::MatchOutcome;
 pub use sync::{SyncDecision, SyncDirection, SyncRow};
 pub use sync_ops::SyncReport;
+pub use updates::{InstallKind, Update, UpdateOutcome, Version};
 
 pub use musubi_anilist::oauth;
 pub use musubi_domain as domain;
