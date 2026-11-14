@@ -4,6 +4,12 @@ All notable changes to Musubi are documented here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Changed
+
+- **A new look, shared with Kura.** Near-black neutral surfaces with hairline borders, the Geist typeface (Geist Mono for versions), one 8px radius, lighter icons and a slimmer sidebar. Primary buttons are light on dark instead of red or teal. Every page shows the same content and actions as before.
+- **Red and teal mark, they no longer fill.** Red still means watching on Jellyfin and teal tracking on AniList, now as progress bars, connection dots, tags, the active page and the `+1` pill.
+- The logo and launcher icon use the new colours.
+
 ### Fixed
 
 - **`install.sh` rejects an empty `--prefix`** instead of installing into `/bin` and `/share`.

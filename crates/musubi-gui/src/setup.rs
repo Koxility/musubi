@@ -245,7 +245,7 @@ fn status<'a>(connected: bool, detail: String, cord: iced::Color) -> Element<'a,
             } else {
                 "Not connected"
             },
-            if connected { cord } else { theme::MUTED }
+            if connected { cord } else { theme::TEXT_2 }
         ),
         ui::muted(detail),
     ]
@@ -277,7 +277,7 @@ fn jellyfin_step<'a>(state: &'a State, auth: &AuthStatus) -> Column<'a, Msg> {
             edit(Edit::ApiKey),
             None
         ),
-        row![ui::watch("Log in to Jellyfin", Msg::LoginJellyfin)],
+        row![ui::primary("Log in to Jellyfin", Msg::LoginJellyfin)],
     ]
     .spacing(theme::S3)
 }
@@ -335,8 +335,8 @@ fn steps<'a>(current: u8) -> Element<'a, Msg> {
         let number = index as u8 + 1;
         let (fill, ink) = match number.cmp(&current) {
             std::cmp::Ordering::Less => (theme::alpha(theme::TRACK, 0.25), theme::TRACK),
-            std::cmp::Ordering::Equal => (theme::TRACK, theme::INK),
-            std::cmp::Ordering::Greater => (theme::RAISED, theme::MUTED),
+            std::cmp::Ordering::Equal => (theme::TRACK, theme::BG),
+            std::cmp::Ordering::Greater => (theme::HOVER, theme::TEXT_2),
         };
         if index > 0 {
             bar = bar.push(
@@ -367,9 +367,9 @@ fn steps<'a>(current: u8) -> Element<'a, Msg> {
                         theme::MEDIUM
                     })
                     .color(if number == current {
-                        theme::PAPER
+                        theme::TEXT
                     } else {
-                        theme::MUTED
+                        theme::TEXT_2
                     }),
             ]
             .spacing(theme::S2)

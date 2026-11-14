@@ -1,7 +1,9 @@
-//! Gestaltungssystem „Zwei Kordeln“: Farben, Maße, Schriften und Widget-Stile.
+//! The design system: colours, measures, fonts and widget styles.
 //!
-//! Rot steht für das Ansehen (Jellyfin), Türkis für das Verfolgen (AniList). Alles andere bleibt
-//! ruhig, damit Poster und diese beiden Farben die Seite tragen.
+//! Musubi shares its look with Kura: near-black neutral surfaces, Geist, one radius, and no
+//! brand colour. Two cord colours carry meaning on top of that. Red stands for watching
+//! (Jellyfin), teal for tracking (AniList); they mark, they do not decorate. Blue is kept
+//! for updates.
 
 mod fonts;
 mod styles;

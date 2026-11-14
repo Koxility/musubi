@@ -1,4 +1,4 @@
-//! Eigene SVG-Icons im 24er-Raster. Gefärbt wird beim Zeichnen, die Dateien sind weiß.
+//! Our own SVG icons on a 24 grid. They are white and get their colour when drawn.
 
 use std::sync::LazyLock;
 
@@ -91,19 +91,19 @@ const ALL: [Icon; 40] = [
     Icon::Menu,
 ];
 
-/// Gefüllte Formen.
+/// Filled shapes.
 const FILL: &str = r##"fill="#fff""##;
-/// Linien mit runden Enden, wie bei modernen Player-Oberflächen üblich.
-const STROKE: &str = r##"fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round""##;
-/// Dünnere Linien für Ziffern. Ein Attribut darf nur einmal vorkommen, sonst verwirft resvg das
-/// ganze Icon.
-const STROKE_THIN: &str = r##"fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round""##;
+/// Lines with round ends, light enough to sit next to Geist at text sizes.
+const STROKE: &str = r##"fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round""##;
+/// Thinner lines for digits. An attribute may appear only once, or resvg drops the whole
+/// icon.
+const STROKE_THIN: &str = r##"fill="none" stroke="#fff" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round""##;
 
 impl Icon {
     fn body(self) -> String {
         let fill = |d: &str| format!(r#"<path {FILL} d="{d}"/>"#);
         let stroke = |d: &str| format!(r#"<path {STROKE} d="{d}"/>"#);
-        // „10“ innerhalb der Kreispfeile, als Linien statt Text, damit keine Schrift nötig ist.
+        // "10" inside the circular arrows, as lines instead of text, so no font is needed.
         let ten = format!(
             r#"<path {STROKE_THIN} d="M9.5 10.8l1.2-.8v4.4"/><rect {STROKE_THIN} x="12.8" y="10" width="2.6" height="4.4" rx="1.3"/>"#
         );
@@ -177,7 +177,7 @@ impl Icon {
                 r#"<circle {STROKE} cx="12" cy="8.5" r="3.7"/>{}"#,
                 stroke("M4.8 19.6a7.3 7.3 0 0 1 14.4 0")
             ),
-            // Zwei Kordeln, die ineinandergreifen: das Zeichen der App.
+            // Two cords that interlock: the mark of the app.
             Self::Knot => format!(
                 r#"<circle {STROKE} cx="9.5" cy="11" r="5"/><circle {STROKE} cx="14.5" cy="13" r="5"/>{}"#,
                 stroke("M4.5 11v9.5M19.5 13V3.5")
@@ -241,7 +241,7 @@ impl Icon {
         )
     }
 
-    /// Einmal erzeugte Handles, damit Iced die Rasterung zwischenspeichern kann.
+    /// Handles made once, so Iced can cache the rasterised icons.
     pub fn handle(self) -> Handle {
         static HANDLES: LazyLock<Vec<Handle>> = LazyLock::new(|| {
             ALL.iter()
@@ -266,7 +266,7 @@ mod tests {
     #[test]
     fn every_icon_parses_and_draws_something() {
         for icon in ALL {
-            // Derselbe Parser wie beim Zeichnen: Ein fehlerhaftes Icon bliebe sonst unsichtbar.
+            // The same parser as when drawing: a broken icon would otherwise just stay invisible.
             let tree = usvg::Tree::from_str(&icon.svg(), &usvg::Options::default())
                 .unwrap_or_else(|e| panic!("{icon:?}: {e}"));
             assert!(tree.root().has_children(), "{icon:?} draws nothing");

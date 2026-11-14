@@ -169,7 +169,7 @@ fn header<'a>(app: &'a App, profile: &'a Profile) -> Element<'a, Msg> {
         want,
     ))
     .padding(3)
-    .style(theme::solid(theme::INK, theme::R_MD));
+    .style(theme::solid(theme::BG, theme::RADIUS));
     let status = if app.profile.loading {
         "Updating…".to_owned()
     } else {
@@ -178,9 +178,7 @@ fn header<'a>(app: &'a App, profile: &'a Profile) -> Element<'a, Msg> {
     let identity = row![
         avatar,
         column![
-            text(&profile.name)
-                .size(theme::T_PAGE)
-                .font(theme::DISPLAY_BOLD),
+            text(&profile.name).size(theme::T_PAGE).font(theme::DISPLAY),
             ui::muted(status),
         ]
         .spacing(2),
@@ -190,14 +188,14 @@ fn header<'a>(app: &'a App, profile: &'a Profile) -> Element<'a, Msg> {
             "Refresh",
             (!app.profile.loading).then_some(Msg::Refresh),
             theme::secondary,
-            theme::PAPER
+            theme::TEXT
         ),
         ui::tool(
             Icon::External,
             "Open on AniList",
             profile.site_url.is_some().then_some(Msg::OpenSite),
             theme::secondary,
-            theme::PAPER
+            theme::TEXT
         ),
     ]
     .spacing(theme::S3)
@@ -235,30 +233,30 @@ fn numbers<'a>(stats: &KindStats, kind: MediaKind) -> Element<'a, Msg> {
             ui::stat(
                 format!("{:.1}", stats.days_watched()),
                 "Days watched",
-                theme::PAPER,
+                theme::TEXT,
             ),
             ui::stat(
                 grouped(u64::from(stats.episodes_watched)),
                 "Episodes watched",
-                theme::PAPER,
+                theme::TEXT,
             ),
-            ui::stat(mean, "Mean score", theme::PAPER),
-            ui::stat(deviation, "Standard deviation", theme::PAPER),
+            ui::stat(mean, "Mean score", theme::TEXT),
+            ui::stat(deviation, "Standard deviation", theme::TEXT),
         ],
         MediaKind::Manga => vec![
             ui::stat(grouped(u64::from(stats.count)), "Total manga", theme::TRACK),
             ui::stat(
                 grouped(u64::from(stats.chapters_read)),
                 "Chapters read",
-                theme::PAPER,
+                theme::TEXT,
             ),
             ui::stat(
                 grouped(u64::from(stats.volumes_read)),
                 "Volumes read",
-                theme::PAPER,
+                theme::TEXT,
             ),
-            ui::stat(mean, "Mean score", theme::PAPER),
-            ui::stat(deviation, "Standard deviation", theme::PAPER),
+            ui::stat(mean, "Mean score", theme::TEXT),
+            ui::stat(deviation, "Standard deviation", theme::TEXT),
         ],
     };
     row(tiles).spacing(theme::S3).into()
@@ -339,7 +337,7 @@ fn columns<'a>(data: Vec<(String, u32)>, color: Color, labels: bool) -> Element<
             column = column.push(
                 text(value.to_string())
                     .size(theme::T_CAPTION)
-                    .color(theme::MUTED),
+                    .color(theme::TEXT_2),
             );
         }
         column = column.push(
@@ -349,7 +347,7 @@ fn columns<'a>(data: Vec<(String, u32)>, color: Color, labels: bool) -> Element<
                 .style(theme::solid(color, 2.0)),
         );
         if labels {
-            column = column.push(text(label).size(theme::T_CAPTION).color(theme::FAINT));
+            column = column.push(text(label).size(theme::T_CAPTION).color(theme::TEXT_3));
         }
         column.into()
     });
@@ -426,7 +424,7 @@ fn ranked<'a>(title: &'a str, buckets: &[StatBucket], limit: usize) -> Element<'
                 .align_x(iced::Alignment::End),
             text(mean)
                 .size(theme::T_SMALL)
-                .color(theme::MUTED)
+                .color(theme::TEXT_2)
                 .width(40)
                 .align_x(iced::Alignment::End),
         ]
@@ -436,10 +434,10 @@ fn ranked<'a>(title: &'a str, buckets: &[StatBucket], limit: usize) -> Element<'
     });
     let head = row![
         ui::spacer(),
-        text("Titles").size(theme::T_CAPTION).color(theme::FAINT),
+        text("Titles").size(theme::T_CAPTION).color(theme::TEXT_3),
         text("Mean")
             .size(theme::T_CAPTION)
-            .color(theme::FAINT)
+            .color(theme::TEXT_3)
             .width(40)
             .align_x(iced::Alignment::End),
     ]

@@ -245,7 +245,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
                 ui::icon(glyph, 14.0, color),
                 text(ui::ellipsize(&entry.message, 110))
                     .size(theme::T_SMALL)
-                    .color(if entry.ok { theme::PAPER } else { theme::BAD })
+                    .color(if entry.ok { theme::TEXT } else { theme::BAD })
                     .width(Fill),
                 ui::muted(when(entry.at)),
             ]
@@ -291,14 +291,14 @@ pub fn view(app: &App) -> Element<'_, Message> {
                     "Compare again",
                     Some(Msg::Reload),
                     theme::secondary,
-                    theme::PAPER
+                    theme::TEXT
                 ),
                 ui::tool(
                     Icon::Check,
                     "Apply changes",
                     (changes > 0 && !state.busy).then_some(Msg::Apply),
-                    theme::track,
-                    theme::INK
+                    theme::primary,
+                    theme::BG
                 ),
             ],
         ),

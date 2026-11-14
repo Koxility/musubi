@@ -713,7 +713,7 @@ fn top_bar<'a>(title: &'a str) -> Element<'a, Msg> {
     if let Some(episode) = episode {
         heading = heading.push(
             text(ui::ellipsize(&episode, 110))
-                .size(14)
+                .size(theme::T_SMALL)
                 .color(theme::ON_VIDEO_MUTED),
         );
     }

@@ -23,7 +23,9 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Git-Stand dieses Builds, gesetzt von `build.rs`.
 pub const COMMIT: &str = env!("MUSUBI_COMMIT");
 /// Width of the navigation rail.
-const RAIL_WIDTH: f32 = 216.0;
+/// Kura's `--rail`.
+const RAIL_WIDTH: f32 = 208.0;
+const NAV_ICON: f32 = 16.0;
 const MENU_ICON: f32 = 18.0;
 /// Width of what is left of a hidden rail: the menu button and the rail's side padding.
 const RAIL_HIDDEN: f32 = MENU_ICON * 1.8 + 2.0 * theme::S2;
@@ -51,10 +53,10 @@ const NAVIGATION: [(Page, &str); 7] = [
     (Page::Profile, "Profile"),
 ];
 
-/// Gruppe der Seitenleiste: Name, Kordelfarbe und ihre Seiten.
+/// A group of the sidebar: name, cord colour and its pages.
 type RailGroup = (&'static str, Color, &'static [(Page, Icon)]);
 
-/// Die Seitenleiste in drei Gruppen, jede mit ihrer Kordelfarbe.
+/// The sidebar in three groups, each with its cord colour.
 const RAIL: [RailGroup; 3] = [
     (
         "Watch",
@@ -68,7 +70,7 @@ const RAIL: [RailGroup; 3] = [
     ),
     (
         "Connect",
-        theme::PAPER,
+        theme::TEXT,
         &[(Page::Mapping, Icon::Link), (Page::Sync, Icon::Sync)],
     ),
 ];
@@ -525,36 +527,34 @@ impl App {
 
     fn nav_item(&self, page: Page, glyph: Icon, cord: Color) -> Element<'_, Message> {
         let active = self.page == page;
-        let tint = if active { cord } else { theme::MUTED };
-        // Der schmale Streifen links zeigt die aktive Seite in der Farbe ihrer Gruppe.
+        let tint = if active { theme::TEXT } else { theme::TEXT_2 };
+        // The narrow bar on the left shows the active page in the colour of its group.
         let marker = container(Space::new())
             .width(3)
-            .height(18)
+            .height(theme::S4)
             .style(theme::solid(
                 if active { cord } else { Color::TRANSPARENT },
-                2.0,
+                theme::PILL,
             ));
         button(
             row![
                 marker,
-                ui::icon(glyph, 18.0, tint),
-                text(Self::label(page)).size(theme::T_BODY).font(if active {
-                    theme::SEMIBOLD
-                } else {
-                    theme::MEDIUM
-                }),
+                ui::icon(glyph, NAV_ICON, tint),
+                text(Self::label(page))
+                    .size(theme::T_SMALL)
+                    .font(theme::MEDIUM),
             ]
             .spacing(theme::S3)
             .align_y(Center),
         )
         .width(Fill)
         .padding(iced::Padding {
-            top: 9.0,
+            top: theme::S2,
             right: theme::S3,
-            bottom: 9.0,
+            bottom: theme::S2,
             left: 0.0,
         })
-        .style(theme::nav_button(active, cord))
+        .style(theme::nav_button(active))
         .on_press(Message::Navigate(page))
         .into()
     }
@@ -569,15 +569,15 @@ impl App {
                 .width(6)
                 .height(6)
                 .style(theme::solid(
-                    if user.is_some() { cord } else { theme::FAINT },
+                    if user.is_some() { cord } else { theme::TEXT_3 },
                     3.0,
                 )),
             text(ui::ellipsize(user.unwrap_or(service), 22))
                 .size(theme::T_LABEL)
                 .color(if user.is_some() {
-                    theme::MUTED
+                    theme::TEXT_2
                 } else {
-                    theme::FAINT
+                    theme::TEXT_3
                 }),
         ]
         .spacing(theme::S2)
@@ -589,7 +589,7 @@ impl App {
         ui::icon_button(
             Icon::Menu,
             MENU_ICON,
-            theme::MUTED,
+            theme::TEXT_2,
             Some(Message::ToggleSidebar),
             if self.rail.value() {
                 "Hide sidebar (Ctrl+B)"
@@ -603,11 +603,11 @@ impl App {
     fn navigation(&self) -> Element<'_, Message> {
         let brand = row![
             self.menu_button(),
-            logo::mark(38.0),
+            logo::mark(28.0),
             text("Musubi")
-                .size(theme::T_TITLE)
-                .font(theme::DISPLAY_BOLD)
-                .color(theme::PAPER),
+                .size(theme::T_SECTION)
+                .font(theme::DISPLAY)
+                .color(theme::TEXT),
         ]
         .spacing(theme::S3)
         .align_y(Center);
@@ -620,9 +620,9 @@ impl App {
                 column![
                     container(
                         text(name)
-                            .size(theme::T_CAPTION)
-                            .font(theme::SEMIBOLD)
-                            .color(theme::FAINT)
+                            .size(theme::T_LABEL)
+                            .font(theme::MEDIUM)
+                            .color(theme::TEXT_3)
                     )
                     .padding(iced::padding::left(theme::S4 - 1.0)),
                     column(items).spacing(2),
@@ -642,13 +642,15 @@ impl App {
             .into(),
             None => Space::new().into(),
         };
+        // Shows which build runs, e.g. whether the launcher still opens an old binary.
+        let version = text(format!("v{VERSION} · {COMMIT}"))
+            .size(theme::T_CAPTION)
+            .font(theme::MONO)
+            .color(theme::TEXT_3);
         let footer = column![
             Self::account_line("Jellyfin", self.auth.jellyfin_user.as_deref(), theme::WATCH),
             Self::account_line("AniList", self.auth.anilist_user.as_deref(), theme::TRACK),
-            // Zeigt, welcher Build läuft, z. B. ob der Starter noch eine alte Binary öffnet.
-            text(format!("v{VERSION} · {COMMIT}"))
-                .size(theme::T_CAPTION)
-                .color(theme::FAINT),
+            version,
         ]
         .spacing(6)
         .padding([0.0, theme::S4]);
@@ -664,7 +666,7 @@ impl App {
                 groups,
                 Space::new().height(Fill),
                 matching,
-                self.nav_item(Page::Settings, Icon::Settings, theme::PAPER),
+                self.nav_item(Page::Settings, Icon::Settings, theme::TEXT),
                 ui::divider(),
                 footer,
             ]
@@ -766,8 +768,8 @@ impl App {
                         .size(theme::T_SMALL)
                         .font(theme::SEMIBOLD)
                         .width(190)
-                        .color(theme::PAPER),
-                    text(*action).size(theme::T_SMALL).color(theme::MUTED),
+                        .color(theme::TEXT),
+                    text(*action).size(theme::T_SMALL).color(theme::TEXT_2),
                 ]
                 .padding([7, 0])
                 .into()

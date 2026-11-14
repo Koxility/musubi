@@ -675,7 +675,7 @@ fn entry_card<'a>(app: &'a App, entry: &ListEntry, size: ViewSize) -> Element<'a
     let mut info = row![
         text(format!("{} / {}", entry.progress, total(entry)))
             .size(detail_size)
-            .color(theme::MUTED)
+            .color(theme::TEXT_2)
     ]
     .align_y(Center);
     if let Some(next) = entry.media.next_airing {
@@ -721,7 +721,7 @@ fn entry_card<'a>(app: &'a App, entry: &ListEntry, size: ViewSize) -> Element<'a
     let mut marks = row![ui::icon_button(
         Icon::More,
         14.0,
-        theme::PAPER,
+        theme::TEXT,
         Some(Msg::OpenEditor(entry.clone())),
         "Edit entry",
         theme::ghost_button,
@@ -786,18 +786,14 @@ fn overview_numbers(app: &App) -> Element<'_, Msg> {
     let airing = airing_entries(&state.anime).len();
     let behind: u32 = state.anime.iter().map(ListEntry::episodes_behind).sum();
     row![
-        ui::stat(watching.to_string(), "Watching", theme::PAPER),
+        ui::stat(watching.to_string(), "Watching", theme::TEXT),
         ui::stat(airing.to_string(), "Airing now", theme::TRACK),
         ui::stat(
             behind.to_string(),
             "Episodes behind",
-            if behind > 0 {
-                theme::WARN
-            } else {
-                theme::PAPER
-            }
+            if behind > 0 { theme::WARN } else { theme::TEXT }
         ),
-        ui::stat(reading.to_string(), "Reading", theme::PAPER),
+        ui::stat(reading.to_string(), "Reading", theme::TEXT),
     ]
     .spacing(theme::S3)
     .into()
@@ -860,7 +856,7 @@ const PLUS_WIDTH: f32 = 56.0;
 const FORMAT_WIDTH: f32 = 72.0;
 
 fn list_head<'a>(kind: MediaKind, size: ViewSize) -> Element<'a, Msg> {
-    let cell = |label: &'a str| text(label).size(theme::T_CAPTION).color(theme::FAINT);
+    let cell = |label: &'a str| text(label).size(theme::T_CAPTION).color(theme::TEXT_3);
     row![
         cell("Title").width(Fill),
         cell("Score").width(SCORE_WIDTH),
@@ -913,7 +909,7 @@ fn list_row<'a>(
         ));
     }
     if entry.private {
-        title = title.push(ui::tag("Private", theme::MUTED));
+        title = title.push(ui::tag("Private", theme::TEXT_2));
     }
     let mut heading = column![title].spacing(3);
     // The large row has room for the countdown and the notes on a second line.
@@ -974,7 +970,7 @@ fn list_row<'a>(
         container(plus).width(PLUS_WIDTH),
         text(entry.media.format.clone().unwrap_or_default())
             .size(theme::T_LABEL)
-            .color(theme::MUTED)
+            .color(theme::TEXT_2)
             .width(FORMAT_WIDTH),
     ]
     .spacing(theme::S3)
@@ -988,7 +984,7 @@ fn status_filter<'a>(state: &'a State, kind: MediaKind) -> Element<'a, Msg> {
     let entries = state.list(kind);
     let item = |label: &'a str, value: Option<ListStatus>, count: usize| -> Element<'a, Msg> {
         let active = state.status == value;
-        let dot = value.map_or(theme::FAINT, theme::status_color);
+        let dot = value.map_or(theme::TEXT_3, theme::status_color);
         button(
             row![
                 container(Space::new())
@@ -1005,14 +1001,14 @@ fn status_filter<'a>(state: &'a State, kind: MediaKind) -> Element<'a, Msg> {
                     .width(Fill),
                 text(count.to_string())
                     .size(theme::T_LABEL)
-                    .color(theme::FAINT),
+                    .color(theme::TEXT_3),
             ]
             .spacing(theme::S2)
             .align_y(Center),
         )
         .width(Fill)
         .padding([7.0, theme::S3])
-        .style(theme::nav_button(active, theme::TRACK))
+        .style(theme::nav_button(active))
         .on_press(Msg::StatusFilter(value))
         .into()
     };
@@ -1133,14 +1129,14 @@ fn header(state: &State) -> Element<'_, Msg> {
                 "Custom lists",
                 Some(Msg::OpenLists),
                 theme::secondary,
-                theme::PAPER
+                theme::TEXT
             ),
             ui::tool(
                 Icon::Plus,
                 "Add title",
                 Some(Msg::OpenAdd),
-                theme::track,
-                theme::INK
+                theme::primary,
+                theme::BG
             ),
         ]
         .spacing(theme::S2)
@@ -1238,7 +1234,7 @@ fn group<'a>(name: &'a str, content: impl Into<Element<'a, Msg>>) -> Element<'a,
         text(name)
             .size(theme::T_SMALL)
             .font(theme::SEMIBOLD)
-            .color(theme::PAPER),
+            .color(theme::TEXT),
         content.into()
     ]
     .spacing(theme::S2)
@@ -1472,7 +1468,7 @@ fn lists_body(dialog: &ListsDialog) -> iced::widget::Column<'_, Msg> {
                     ui::icon_button(
                         Icon::Edit,
                         15.0,
-                        theme::MUTED,
+                        theme::TEXT_2,
                         Some(Msg::StartRename(name.clone())),
                         "Rename",
                         theme::quiet
