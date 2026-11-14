@@ -4,6 +4,13 @@ All notable changes to Musubi are documented here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Fixed
+
+- **`install.sh` rejects an empty `--prefix`** instead of installing into `/bin` and `/share`.
+- **An install folder with spaces works.** The launcher entry that `install.sh` writes now quotes the path to Musubi, so a prefix with spaces or other special characters starts the app.
+- **The Arch packages verify their downloads.** Both PKGBUILDs carry the real checksums of the release they describe, and a release can no longer be packed while one of them has its check switched off.
+- Packing a release at the same time in two places no longer risks a half-written archive.
+
 ## [0.4.2] - 2026-11-13
 
 ### Added

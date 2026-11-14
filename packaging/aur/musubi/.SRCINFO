@@ -25,6 +25,6 @@ pkgbase = musubi
 	options = !lto
 	options = !debug
 	source = musubi-0.4.2.tar.gz::https://github.com/Koxility/musubi/archive/refs/tags/v0.4.2.tar.gz
-	sha256sums = SKIP
+	sha256sums = d67ac8ea668658ebab1b11b7378e5512c3fbec4758884e1f7585928e12115a55
 
 pkgname = musubi
