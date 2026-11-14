@@ -19,6 +19,7 @@ depends=(
   'gst-libav'
   'hicolor-icon-theme'
   'libxkbcommon'
+  'libxkbcommon-x11'
   'wayland'
 )
 makedepends=('cargo')

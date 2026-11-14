@@ -18,6 +18,7 @@ pkgbase = musubi
 	depends = gst-libav
 	depends = hicolor-icon-theme
 	depends = libxkbcommon
+	depends = libxkbcommon-x11
 	depends = wayland
 	optdepends = org.freedesktop.secrets: keep login tokens in the desktop keyring (KWallet, GNOME Keyring)
 	optdepends = gst-plugin-va: hardware video decoding through VA-API
