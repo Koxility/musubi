@@ -312,6 +312,33 @@ pub fn danger(_: &Theme, status: button::Status) -> button::Style {
     }
 }
 
+/// An available update: the one place the info blue fills a button. Disabled, it is as
+/// quiet as any other disabled button, so "nothing to do" does not draw the eye.
+pub fn info(_: &Theme, status: button::Status) -> button::Style {
+    match status {
+        button::Status::Disabled => flat(
+            Color::TRANSPARENT,
+            alpha(TEXT, DISABLED),
+            outlined(LINE, RADIUS),
+        ),
+        button::Status::Hovered | button::Status::Pressed => flat(
+            mix(INFO, Color::WHITE, 0.12),
+            BG,
+            outlined(mix(INFO, Color::WHITE, 0.12), RADIUS),
+        ),
+        button::Status::Active => flat(INFO, BG, outlined(INFO, RADIUS)),
+    }
+}
+
+/// The small "Update" pill under the version: tinted, not filled, as in Kura.
+pub fn update_badge(_: &Theme, status: button::Status) -> button::Style {
+    let fill = match status {
+        button::Status::Hovered | button::Status::Pressed => 0.24,
+        _ => 0.14,
+    };
+    flat(alpha(INFO, fill), INFO, outlined(alpha(INFO, 0.45), PILL))
+}
+
 /// Clickable card: no surface, lifted slightly on hover.
 pub fn card_button(_: &Theme, status: button::Status) -> button::Style {
     match status {

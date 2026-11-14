@@ -18,6 +18,7 @@ mod setup;
 mod sync;
 mod theme;
 mod ui;
+mod updates;
 mod video;
 
 use anyhow::Context;

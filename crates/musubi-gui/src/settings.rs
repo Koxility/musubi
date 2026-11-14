@@ -6,7 +6,7 @@ use musubi_core::Config;
 
 use crate::anilist_login::{self, Outcome};
 use crate::app::{App, COMMIT, Message, VERSION};
-use crate::{logo, setup, theme, ui};
+use crate::{logo, setup, theme, ui, updates};
 
 #[derive(Default)]
 pub struct State {
@@ -182,8 +182,9 @@ fn half<'a>(field: Element<'a, Msg>) -> Element<'a, Msg> {
     container(field).width(Fill).into()
 }
 
-/// Version and git commit of this build, so bug reports are unambiguous.
-fn about<'a>() -> Element<'a, Message> {
+/// Version and git commit of this build, so bug reports are unambiguous, and the update
+/// button next to them.
+fn about(app: &App) -> Element<'_, Message> {
     let fact = |name: &'static str, value: &'static str| {
         row![
             ui::muted(name),
@@ -195,7 +196,7 @@ fn about<'a>() -> Element<'a, Message> {
         .spacing(6)
         .align_y(Center)
     };
-    row![
+    let line = row![
         logo::mark(36.0),
         column![
             text("Musubi").size(theme::T_BODY).font(theme::DISPLAY),
@@ -205,10 +206,16 @@ fn about<'a>() -> Element<'a, Message> {
         ui::spacer(),
         fact("Version", VERSION),
         fact("Commit", COMMIT),
+        updates::action(&app.updates),
     ]
     .spacing(theme::S4)
-    .align_y(Center)
-    .into()
+    .align_y(Center);
+    match updates::hint(&app.updates) {
+        Some(hint) => column![line, row![ui::spacer(), hint]]
+            .spacing(theme::S2)
+            .into(),
+        None => line.into(),
+    }
 }
 
 pub fn view(app: &App) -> Element<'_, Message> {
@@ -299,7 +306,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
     .into_iter()
     .map(|part| part.map(Message::Settings));
     let body = column(cards)
-        .push(about())
+        .push(about(app))
         .spacing(theme::S4)
         .max_width(820)
         .padding(iced::Padding {

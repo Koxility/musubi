@@ -4,6 +4,11 @@ All notable changes to Musubi are documented here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Added
+
+- **Update check.** At every start Musubi asks GitHub whether a newer release is out. When there is one, a small blue *Update* pill appears under the version in the sidebar and the *Update* button at the bottom of Settings becomes active; without one the button stays greyed out.
+- **Update from inside the app.** The button updates Musubi the way it was installed. A copy installed with `install.sh` downloads the release, checks its checksum and replaces itself; a restart finishes it. A copy installed as an Arch package opens a terminal and rebuilds the package with `makepkg -si` from the project's PKGBUILD, and is only offered a version once that PKGBUILD has it. Any other copy gets the release page.
+
 ### Changed
 
 - **A new look, shared with Kura.** Near-black neutral surfaces with hairline borders, the Geist typeface (Geist Mono for versions), one 8px radius, lighter icons and a slimmer sidebar. Primary buttons are light on dark instead of red or teal. Every page shows the same content and actions as before.

@@ -15,7 +15,9 @@ use tokio::sync::broadcast;
 use crate::icons::Icon;
 use crate::images::{ImageCache, ImageKey};
 use crate::ui;
-use crate::{anilist, home, library, logo, mapping, profile, settings, setup, sync, theme, video};
+use crate::{
+    anilist, home, library, logo, mapping, profile, settings, setup, sync, theme, updates, video,
+};
 
 const TOAST_SECONDS: u64 = 5;
 /// Version dieses Builds.
@@ -115,6 +117,7 @@ pub enum Message {
     Settings(settings::Msg),
     Profile(profile::Msg),
     Setup(setup::Msg),
+    Update(updates::Msg),
     Video(video::Msg),
     Player(PlayerCommand),
 }
@@ -133,6 +136,7 @@ pub struct App {
     pub settings: settings::State,
     pub profile: profile::State,
     pub setup: Option<setup::State>,
+    pub updates: updates::State,
     pub video: video::State,
     video_link: Option<video::VideoLink>,
     pub now: i64,
@@ -258,6 +262,7 @@ impl App {
             sync: sync::State::default(),
             settings: settings::State::new(&config),
             profile: profile::State::default(),
+            updates: updates::State::default(),
             now: unix_now(),
             nav_generation: 0,
             view_epoch: 0,
@@ -283,7 +288,11 @@ impl App {
         if let Err(error) = app.core.warn_if_expiring() {
             tracing::warn!(%error, "could not check the token expiry");
         }
-        let task = Task::batch([app.load_everything(), library::load_cached(&app)]);
+        let task = Task::batch([
+            app.load_everything(),
+            library::load_cached(&app),
+            updates::check(&app),
+        ]);
         (app, task)
     }
 
@@ -437,7 +446,10 @@ impl App {
     fn on_escape(&mut self) {
         if self.help {
             self.help = false;
-        } else if self.anilist.close_modal() || self.mapping.close_modal() {
+        } else if self.updates.close_modal()
+            || self.anilist.close_modal()
+            || self.mapping.close_modal()
+        {
         } else if self.page == Page::Home || self.page == Page::Library {
             self.close_detail();
         }
@@ -506,6 +518,7 @@ impl App {
             Message::Settings(msg) => return settings::update(self, msg),
             Message::Profile(msg) => return profile::update(self, msg),
             Message::Setup(msg) => return setup::update(self, msg),
+            Message::Update(msg) => return updates::update(self, msg),
             Message::Video(msg) => return video::update(self, msg),
             Message::Player(command) => {
                 let core = self.core.clone();
@@ -647,13 +660,17 @@ impl App {
             .size(theme::T_CAPTION)
             .font(theme::MONO)
             .color(theme::TEXT_3);
-        let footer = column![
+        let mut footer = column![
             Self::account_line("Jellyfin", self.auth.jellyfin_user.as_deref(), theme::WATCH),
             Self::account_line("AniList", self.auth.anilist_user.as_deref(), theme::TRACK),
             version,
         ]
         .spacing(6)
         .padding([0.0, theme::S4]);
+        // Directly under the version, and only when a newer one is out.
+        if let Some(badge) = updates::badge(&self.updates) {
+            footer = footer.push(badge);
+        }
         let rail = container(
             column![
                 container(brand).padding(iced::Padding {
@@ -803,6 +820,7 @@ impl App {
         .into();
         let mut layered = anilist::with_modal(self, shell);
         layered = mapping::with_modal(self, layered);
+        layered = updates::with_modal(self, layered);
         if self.help {
             layered = ui::modal(
                 layered,

@@ -27,6 +27,8 @@ pub const TEXT_3: Color = Color::from_rgb8(0x6b, 0x6b, 0x6b);
 pub const OK: Color = Color::from_rgb8(0x3e, 0xcf, 0x8e);
 pub const WARN: Color = Color::from_rgb8(0xf5, 0xa5, 0x24);
 pub const BAD: Color = Color::from_rgb8(0xf0, 0x44, 0x38);
+/// Updates and nothing else.
+pub const INFO: Color = Color::from_rgb8(0x4c, 0x8d, 0xff);
 
 // The two cords. They mark what belongs to which service and never fill a large area:
 // progress, connection dots, tags, the active page, the "+1" pill.
