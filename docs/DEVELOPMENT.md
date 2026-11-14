@@ -52,6 +52,8 @@ cargo run -p musubi-core --example demo_backend -- path/to/video.mkv
 
 Debug builds send AniList requests to `MUSUBI_DEV_ANILIST_ENDPOINT` when it is set; point it at the printed AniList URL. Release builds ignore the variable.
 
+With `--update` the demo also stands in for GitHub and announces a release far ahead of any real one. It prints an `UPDATE` URL; point `MUSUBI_DEV_UPDATE_ENDPOINT` at it (debug builds only) to see the update pill in the sidebar and the active button in Settings. Without the variable the app asks GitHub and shows itself as up to date.
+
 The demo serves generated artwork, anime and manga lists and profile statistics, so every page has content. With `--login` it also logs the profile under the usual XDG paths in to both mock servers. Point `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME` and `XDG_STATE_HOME` at a scratch directory for both the demo and the app to try the GUI without touching your real profile:
 
 ```bash
@@ -66,7 +68,7 @@ Everything is written in English: code comments, UI, docs and commit messages. O
 
 ## Releasing
 
-1. Set the version in `Cargo.toml` (`[workspace.package]`) and in both PKGBUILDs under `packaging/aur/`, and run `cargo build` once, so `Cargo.lock` picks up the new version. The release workflow builds with `--locked` and fails otherwise.
+1. Set the version in `Cargo.toml` (`[workspace.package]`) and run `cargo build` once, so `Cargo.lock` picks up the new version. The release workflow builds with `--locked` and fails otherwise.
 2. Add a `## [x.y.z] - YYYY-MM-DD` section to `CHANGELOG.md`.
 3. Merge to `master`, then fetch it, tag and push. Without the fetch, `origin/master` can be stale and the tag lands on an older commit; the release then fails because the version doesn't match.
 
@@ -92,13 +94,15 @@ packaging/package.sh x.y.z
 
 ### Arch packages
 
-`packaging/aur/musubi` builds from the GitHub source tarball of the tag, `packaging/aur/musubi-bin` repackages the release archive. Bump `pkgver` in both together with `Cargo.toml` and reset `pkgrel` to 1. Their checksums can only be filled in once the release exists, so the tagged commit carries `sha256sums=('SKIP')`. After the workflow has published the release, run on an Arch machine (needs `pacman-contrib`):
+`packaging/aur/musubi` builds from the GitHub source tarball of a tag, `packaging/aur/musubi-bin` repackages the release archive. The PKGBUILDs in the repository always describe the latest *published* release, with its real checksums: the tarball and the archive of a release only exist once it is out, so their checksums cannot be part of the commit that gets tagged. Do not set `pkgver` by hand and never set a checksum to `SKIP`; `packaging/package.sh` refuses to pack a release while one is.
+
+After the workflow has published the release, move both PKGBUILDs to it. Run on an Arch machine (needs `pacman-contrib`):
 
 ```bash
-packaging/aur/update.sh
+packaging/aur/update.sh x.y.z
 ```
 
-It fills in the checksums and regenerates `.SRCINFO`. Build both once with `makepkg -si` in a clean chroot or at least a clean directory, commit the result to `master`, then copy `PKGBUILD` and `.SRCINFO` of each into its AUR repository and push:
+It sets `pkgver`, fills in the checksums and regenerates `.SRCINFO`. Build both once with `makepkg -si` in a clean chroot or at least a clean directory, commit the result to `master`, then copy `PKGBUILD` and `.SRCINFO` of each into its AUR repository and push:
 
 ```bash
 git clone ssh://aur@aur.archlinux.org/musubi.git aur-musubi
@@ -108,4 +112,8 @@ git clone ssh://aur@aur.archlinux.org/musubi.git aur-musubi
 cp packaging/aur/musubi/{PKGBUILD,.SRCINFO} aur-musubi/ && cd aur-musubi && git add PKGBUILD .SRCINFO && git commit -m "Update to x.y.z" && git push
 ```
 
-The same for `musubi-bin`. A fix to the packaging alone, without a new release, raises `pkgrel` instead of `pkgver`.
+The same for `musubi-bin`.
+
+The app's own update check depends on this step: a copy that pacman owns is only offered a new version once the PKGBUILD of its package on `master` has reached it, and then rebuilds itself from exactly that PKGBUILD. Until `update.sh` has run and its result is on `master`, Arch users see no update.
+
+A fix to the packaging alone, without a new release, raises `pkgrel` instead of `pkgver`.

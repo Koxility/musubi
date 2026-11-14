@@ -69,7 +69,7 @@ git clone https://github.com/Koxility/musubi.git
 cd musubi/packaging/aur/musubi && makepkg -si
 ```
 
-Use `packaging/aur/musubi-bin` instead to skip the build. Updates come with `paru -Syu`, or by running `git pull` and `makepkg -si` again; `sudo pacman -R musubi` removes Musubi.
+Use `packaging/aur/musubi-bin` instead to skip the build. Updates come with `paru -Syu`, with the *Update* button in Musubi's settings, or by running `git pull` and `makepkg -si` again; `sudo pacman -R musubi` removes Musubi.
 
 If you installed Musubi with `install.sh` before, remove that copy first, or its launcher entry and `~/.local/bin/musubi` keep starting the old version: `packaging/install.sh --uninstall` in the cloned repository does it.
 
@@ -105,7 +105,7 @@ The [releases page](https://github.com/Koxility/musubi/releases/latest) has the 
 | `sudo ./install.sh --prefix /usr/local` | Install for all users |
 | `./install.sh --uninstall` | Remove it again; add the same `--prefix` you installed with |
 
-To update, install the new release the same way; it replaces the old files. Uninstalling keeps your settings and data.
+To update, press *Update* in Musubi's settings, or install the new release the same way; it replaces the old files. Uninstalling keeps your settings and data.
 
 ### From source
 
@@ -156,9 +156,21 @@ AniList tokens are valid for one year. Musubi reminds you 14 days before yours e
 | **Profile** | Your AniList statistics for anime and manga |
 | **Mapping** | Check and change which AniList entry each season belongs to |
 | **Sync** | Compare Jellyfin and AniList and apply differences in either direction |
-| **Settings** | Accounts, sync and playback options |
+| **Settings** | Accounts, sync and playback options, and updates |
 
 Library and AniList have a view switch at the top right: grid or list, each in three sizes. Musubi remembers the choice per page. The rows on Home scroll sideways by dragging the cards with the mouse, with a touchpad swipe, `Shift` + mouse wheel, the arrows in the row header or the thin bar below the cards.
+
+### Updates
+
+Musubi checks GitHub for a newer release every time it starts. When one is out, a small blue **Update** pill appears under the version number in the sidebar, and the **Update** button at the bottom of *Settings* turns blue; otherwise that button is greyed out. What the button does depends on how Musubi was installed:
+
+| Installed with | The button |
+|---|---|
+| `install.sh` | Downloads the release, verifies its checksum and replaces the installation. Restart Musubi afterwards. |
+| The Arch package (`musubi` or `musubi-bin`) | Opens a terminal and rebuilds the package with `makepkg -si` from Musubi's PKGBUILD; pacman asks for your password there. The update is offered once the package for the new version is ready. |
+| Anything else, such as `cargo install` | Opens a dialog with a link to the release page. |
+
+The check is a single request to `api.github.com`. It carries Musubi's version and nothing about your accounts or library.
 
 ### Keyboard shortcuts
 

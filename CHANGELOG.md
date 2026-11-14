@@ -4,6 +4,8 @@ All notable changes to Musubi are documented here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-14
+
 ### Added
 
 - **Update check.** At every start Musubi asks GitHub whether a newer release is out. When there is one, a small blue *Update* pill appears under the version in the sidebar and the *Update* button at the bottom of Settings becomes active; without one the button stays greyed out.
@@ -145,6 +147,7 @@ First release.
 - Playback needs GStreamer with `gst-plugins-base`, `-good`, `-bad` and `gst-libav`.
 - You need your own AniList client ID; see the README.
 
+[0.5.0]: https://github.com/Koxility/musubi/releases/tag/v0.5.0
 [0.4.2]: https://github.com/Koxility/musubi/releases/tag/v0.4.2
 [0.4.1]: https://github.com/Koxility/musubi/releases/tag/v0.4.1
 [0.4.0]: https://github.com/Koxility/musubi/releases/tag/v0.4.0
