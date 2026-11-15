@@ -7,8 +7,8 @@
 #   ./install.sh --uninstall             # same --prefix as for the install
 #
 # PREFIX in the environment works as well, as in earlier versions.
-# On Arch and its derivatives, prefer the PKGBUILD in packaging/aur/: pacman then tracks
-# and updates the files.
+# On Arch and its derivatives, prefer `makepkg -si` with the PKGBUILD at the repository
+# root: pacman then tracks and updates the files.
 set -eu
 
 usage() {

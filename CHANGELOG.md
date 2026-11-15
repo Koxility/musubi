@@ -4,6 +4,11 @@ All notable changes to Musubi are documented here. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Changed
+
+- **One PKGBUILD at the repository root.** On Arch, `git clone`, `cd musubi` and `makepkg -si` build and install the checkout you cloned. It replaces the two PKGBUILDs in `packaging/aur/` (`musubi` and `musubi-bin`), which are gone; `makepkg -si` replaces an installed `musubi-bin`.
+- **The in-app update for Arch packages builds the release tag.** It clones the new version's tag and runs `makepkg -si` there, and is offered as soon as the release is out.
+
 ## [0.5.0] - 2026-11-14
 
 ### Added

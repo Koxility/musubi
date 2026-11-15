@@ -1,8 +1,8 @@
 //! Looks for a newer release on GitHub and installs it the way this copy was installed.
 //!
 //! A copy that `install.sh` put into a folder the user owns is replaced from the release
-//! archive. A copy that pacman owns is rebuilt from the project's PKGBUILD in a terminal,
-//! because that needs the user's password. Anything else is pointed at the release page.
+//! archive. A copy that pacman owns is rebuilt in a terminal from a clone of the release
+//! tag with its root PKGBUILD, because installing needs the user's password. Anything else is pointed at the release page.
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -13,7 +13,7 @@ use tokio::process::Command;
 use crate::{Core, CoreError, Result};
 
 const LATEST_RELEASE: &str = "https://api.github.com/repos/Koxility/musubi/releases/latest";
-const PKGBUILDS: &str = "https://raw.githubusercontent.com/Koxility/musubi/master/packaging/aur";
+const REPOSITORY: &str = "https://github.com/Koxility/musubi.git";
 const RELEASE_PAGES: &str = "https://github.com/Koxility/musubi/releases/tag";
 
 /// A release version such as `0.5.0`. Ordered, so a newer one compares greater.
@@ -54,7 +54,7 @@ impl std::fmt::Display for Version {
 /// How the running copy got onto this machine, which decides how it is updated.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InstallKind {
-    /// Owned by this pacman package, `musubi` or `musubi-bin`.
+    /// Owned by this pacman package: `musubi`, or `musubi-bin` from the old AUR packaging.
     Pacman { package: String },
     /// Put below this prefix by `install.sh`, in a place the user may write to.
     Script { prefix: PathBuf },
@@ -70,7 +70,6 @@ pub struct Update {
     pub page: String,
     pub install: InstallKind,
     archive: Option<Asset>,
-    pkgbuild: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -120,14 +119,6 @@ fn script_prefix(exe: &Path) -> Option<&Path> {
         .flatten()
 }
 
-/// The `pkgver` line of a PKGBUILD.
-fn pkgbuild_version(pkgbuild: &str) -> Option<Version> {
-    pkgbuild
-        .lines()
-        .find_map(|line| line.strip_prefix("pkgver="))
-        .and_then(Version::parse)
-}
-
 fn archive_asset(release: &Release, version: Version) -> Option<Asset> {
     let name = format!("musubi-{version}-x86_64-linux.tar.gz");
     let url_of = |name: &str| {
@@ -143,12 +134,22 @@ fn archive_asset(release: &Release, version: Version) -> Option<Asset> {
     })
 }
 
+/// The shell commands that clone the release tag into `build_dir` and build and install
+/// the package from its PKGBUILD.
+fn makepkg_command(version: Version, build_dir: &Path) -> String {
+    let dir = build_dir.display().to_string().replace('\'', r"'\''");
+    format!(
+        "rm -rf '{dir}' && git clone --depth 1 --branch v{version} {REPOSITORY} '{dir}' \
+         && cd '{dir}' && makepkg -si"
+    )
+}
+
 /// Runs in the terminal for a pacman-owned copy. It keeps the window open at the end, so
 /// the result can be read whichever terminal it is.
 fn pacman_script(package: &str, version: Version, build_dir: &Path) -> String {
     format!(
         r#"#!/bin/sh
-# Written by Musubi: updates the {package} package through the project's PKGBUILD.
+# Written by Musubi: rebuilds the {package} package from the release tag's PKGBUILD.
 finish() {{
     status=$?
     echo
@@ -162,11 +163,10 @@ finish() {{
 }}
 trap finish EXIT
 set -eu
-cd '{dir}'
 echo "Updating {package} to {version} with makepkg."
-makepkg -si
+{command}
 "#,
-        dir = build_dir.display().to_string().replace('\'', r"'\''"),
+        command = makepkg_command(version, build_dir),
     )
 }
 
@@ -295,14 +295,6 @@ impl Core {
         }
     }
 
-    fn pkgbuild_url(&self, package: &str) -> String {
-        let base = match &self.inner.update_endpoint {
-            Some(base) => format!("{base}/aur"),
-            None => PKGBUILDS.to_owned(),
-        };
-        format!("{base}/{package}/PKGBUILD")
-    }
-
     async fn install_kind(&self) -> InstallKind {
         match &self.inner.install_kind {
             Some(kind) => kind.clone(),
@@ -315,9 +307,9 @@ impl Core {
         Ok(response.text().await?)
     }
 
-    /// Asks GitHub for the latest release. `Some` if it is newer than this build and can be
-    /// installed here: a pacman-owned copy is only offered a version once the project's
-    /// PKGBUILD for its package has reached it.
+    /// Asks GitHub for the latest release. `Some` if it is newer than this build. The
+    /// release tag carries a PKGBUILD of the same version, so a pacman-owned copy can
+    /// always be rebuilt from it.
     pub async fn check_for_update(&self) -> Result<Option<Update>> {
         let release: Release = self
             .inner
@@ -335,7 +327,7 @@ impl Core {
             return Ok(None);
         };
         let install = self.install_kind().await;
-        let mut update = Update {
+        Ok(Some(Update {
             version: latest,
             page: if release.html_url.is_empty() {
                 format!("{RELEASE_PAGES}/v{latest}")
@@ -343,21 +335,8 @@ impl Core {
                 release.html_url.clone()
             },
             archive: archive_asset(&release, latest),
-            pkgbuild: None,
             install,
-        };
-        if let InstallKind::Pacman { package } = &update.install {
-            let pkgbuild = self.download_text(&self.pkgbuild_url(package)).await?;
-            let Some(packaged) = pkgbuild_version(&pkgbuild).filter(|v| *v > current) else {
-                return Ok(None);
-            };
-            if packaged != latest {
-                update.version = packaged;
-                update.page = format!("{RELEASE_PAGES}/v{packaged}");
-            }
-            update.pkgbuild = Some(pkgbuild);
-        }
-        Ok(Some(update))
+        }))
     }
 
     /// Installs `update` the way this copy was installed, see [`UpdateOutcome`].
@@ -432,23 +411,17 @@ impl Core {
         Ok(())
     }
 
-    /// Puts the PKGBUILD that the check read into a build directory and runs `makepkg -si`
-    /// on it in a terminal, where sudo can ask for the password.
+    /// Clones the release tag and runs `makepkg -si` on its PKGBUILD in a terminal, where
+    /// sudo can ask for the password.
     async fn start_makepkg(&self, update: &Update, package: &str) -> Result<UpdateOutcome> {
-        let pkgbuild = update
-            .pkgbuild
-            .as_ref()
-            .ok_or_else(|| failed("the PKGBUILD of the update is missing"))?;
         let dir = self.update_dir().await?;
         let build_dir = dir.join(package);
-        tokio::fs::create_dir_all(&build_dir).await?;
-        tokio::fs::write(build_dir.join("PKGBUILD"), pkgbuild).await?;
         let script = dir.join("update.sh");
         tokio::fs::write(&script, pacman_script(package, update.version, &build_dir)).await?;
 
         let preferred = std::env::var("TERMINAL").ok();
         let manual = || UpdateOutcome::Manual {
-            command: Some(format!("cd '{}' && makepkg -si", build_dir.display())),
+            command: Some(makepkg_command(update.version, &build_dir)),
             page: update.page.clone(),
         };
         let Some((program, args)) = terminal_command(preferred.as_deref(), on_path, &script) else {
@@ -502,11 +475,16 @@ mod tests {
         assert_eq!(prefix("/home/me/.local/bin/other"), None);
     }
 
+    /// The pacman update builds the PKGBUILD of the release tag, so it has to carry the
+    /// version of that release.
     #[test]
-    fn pkgver_is_read_from_a_pkgbuild() {
-        let pkgbuild = "# Maintainer: x\n\npkgname=musubi\npkgver=0.5.0\npkgrel=1\n";
-        assert_eq!(pkgbuild_version(pkgbuild), Version::parse("0.5.0"));
-        assert_eq!(pkgbuild_version("pkgname=musubi\n"), None);
+    fn root_pkgbuild_has_the_workspace_version() {
+        let pkgbuild = include_str!("../../../PKGBUILD");
+        let pkgver = pkgbuild
+            .lines()
+            .find_map(|line| line.strip_prefix("pkgver="))
+            .and_then(Version::parse);
+        assert_eq!(pkgver, Some(Version::current()), "set pkgver in PKGBUILD");
     }
 
     #[test]
@@ -546,8 +524,8 @@ mod tests {
     #[test]
     fn pacman_script_quotes_its_directory() {
         let version = Version::parse("0.5.0").unwrap();
-        let script = pacman_script("musubi-bin", version, Path::new("/home/o'neil/.cache/x"));
-        assert!(script.contains(r"cd '/home/o'\''neil/.cache/x'"));
-        assert!(script.contains("makepkg -si"));
+        let script = pacman_script("musubi", version, Path::new("/home/o'neil/.cache/x"));
+        assert!(script.contains("git clone --depth 1 --branch v0.5.0 "));
+        assert!(script.contains(r"cd '/home/o'\''neil/.cache/x' && makepkg -si"));
     }
 }

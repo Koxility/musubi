@@ -1376,33 +1376,24 @@ async fn a_failing_update_check_is_an_error_not_an_update() {
     ));
 }
 
+/// The release tag carries a PKGBUILD of its version, so a pacman copy needs nothing beyond
+/// the release itself.
 #[tokio::test]
-async fn a_pacman_copy_waits_for_its_pkgbuild() {
+async fn a_pacman_copy_is_offered_the_release() {
     let dir = tempfile::tempdir().unwrap();
-    let pacman = || InstallKind::Pacman {
-        package: "musubi-bin".to_owned(),
+    let github = MockServer::start().await;
+    mock_release(&github, release("v99.0.0")).await;
+    let pacman = InstallKind::Pacman {
+        package: "musubi".to_owned(),
     };
-    for (pkgver, expected) in [("0.0.1", None), ("99.0.0", Some("99.0.0"))] {
-        let github = MockServer::start().await;
-        mock_release(&github, release("v99.0.0")).await;
-        Mock::given(method("GET"))
-            .and(path("/aur/musubi-bin/PKGBUILD"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_string(format!("pkgname=musubi-bin\npkgver={pkgver}\npkgrel=1\n")),
-            )
-            .mount(&github)
-            .await;
-        let core = update_core(dir.path(), &github, pacman()).await;
+    let core = update_core(dir.path(), &github, pacman).await;
 
-        let update = core.check_for_update().await.unwrap();
+    let update = core.check_for_update().await.unwrap();
 
-        assert_eq!(
-            update.map(|u| u.version.to_string()).as_deref(),
-            expected,
-            "{pkgver}"
-        );
-    }
+    assert_eq!(
+        update.map(|u| u.version.to_string()).as_deref(),
+        Some("99.0.0")
+    );
 }
 
 /// Packs a release archive whose `install.sh` only records the prefix it was given, and

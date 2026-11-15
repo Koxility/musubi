@@ -2,3 +2,7 @@
 .env
 .env.*
 /dist
+# makepkg output of the root PKGBUILD
+/src/
+/pkg/
+/*.pkg.tar.*
