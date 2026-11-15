@@ -47,31 +47,23 @@ Musubi (結び, "knot, connection") is a desktop app for Linux that ties two thi
 
 ## Installation
 
-Pick one of the three ways. On Arch and its derivatives, the package is the best choice: pacman pulls in GStreamer, keeps Musubi up to date and removes it cleanly.
+Pick one of the three ways. On Arch and its derivatives, the package is the best choice: pacman pulls in GStreamer, tracks Musubi's files and removes it cleanly.
 
 ### Arch Linux, CachyOS and derivatives
 
-Musubi comes in two packages: `musubi` builds from source, `musubi-bin` installs the prebuilt release binary. Both put `musubi` into `/usr/bin` and add it to your application launcher.
-
-From the [AUR](https://aur.archlinux.org/packages/musubi), with an AUR helper such as `paru` or `yay`:
-
-```bash
-paru -S musubi
-```
-
-Without an AUR helper, or before the packages appear on the AUR, build the package from this repository with `makepkg`:
+The repository has a `PKGBUILD` at its root that builds the checkout. Clone it and run `makepkg` there; it installs the build dependencies and GStreamer, builds Musubi and installs it with pacman into `/usr/bin`, with its launcher entry and icon:
 
 ```bash
 git clone https://github.com/Koxility/musubi.git
 ```
 
 ```bash
-cd musubi/packaging/aur/musubi && makepkg -si
+cd musubi && makepkg -si
 ```
 
-Use `packaging/aur/musubi-bin` instead to skip the build. Updates come with `paru -Syu`, with the *Update* button in Musubi's settings, or by running `git pull` and `makepkg -si` again; `sudo pacman -R musubi` removes Musubi.
+To update, press *Update* in Musubi's settings, or run `git pull` and `makepkg -si` again in the clone. `sudo pacman -R musubi` removes Musubi.
 
-If you installed Musubi with `install.sh` before, remove that copy first, or its launcher entry and `~/.local/bin/musubi` keep starting the old version: `packaging/install.sh --uninstall` in the cloned repository does it.
+If you installed Musubi with `install.sh` before, remove that copy first, or its launcher entry and `~/.local/bin/musubi` keep starting the old version: `packaging/install.sh --uninstall` in the clone does it.
 
 ### Prebuilt binary
 
@@ -167,7 +159,7 @@ Musubi checks GitHub for a newer release every time it starts. When one is out, 
 | Installed with | The button |
 |---|---|
 | `install.sh` | Downloads the release, verifies its checksum and replaces the installation. Restart Musubi afterwards. |
-| The Arch package (`musubi` or `musubi-bin`) | Opens a terminal and rebuilds the package with `makepkg -si` from Musubi's PKGBUILD; pacman asks for your password there. The update is offered once the package for the new version is ready. |
+| The Arch package (`makepkg -si`) | Opens a terminal, clones the new release and rebuilds the package there with `makepkg -si`; pacman asks for your password there. |
 | Anything else, such as `cargo install` | Opens a dialog with a link to the release page. |
 
 The check is a single request to `api.github.com`. It carries Musubi's version and nothing about your accounts or library.

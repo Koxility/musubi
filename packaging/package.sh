@@ -33,12 +33,6 @@ if [ -z "$(printf '%s' "$notes" | tr -d '[:space:]')" ]; then
     exit 1
 fi
 
-# A PKGBUILD without checksums must not reach a release.
-if grep -q "SKIP" packaging/aur/*/PKGBUILD; then
-    echo "A PKGBUILD in packaging/aur/ has a checksum set to SKIP" >&2
-    exit 1
-fi
-
 name="musubi-$version-x86_64-linux"
 # Everything is built in a directory of this run and then renamed into dist/. A rename
 # within one file system is atomic, so runs at the same time never see or leave a

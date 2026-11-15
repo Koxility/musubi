@@ -1,7 +1,13 @@
 # Maintainer: Koxility <https://github.com/Koxility>
+#
+# Builds Musubi from this checkout, including any local changes:
+#
+#   git clone https://github.com/Koxility/musubi.git && cd musubi && makepkg -si
+#
+# There is no source array: every step works in $startdir, the repository itself.
 
 pkgname=musubi
-pkgver=0.4.2
+pkgver=0.5.0
 pkgrel=1
 pkgdesc='Stream anime from Jellyfin and keep your AniList in sync'
 arch=('x86_64')
@@ -28,35 +34,34 @@ optdepends=(
   'gst-plugin-va: hardware video decoding through VA-API'
   'vulkan-icd-loader: GPU rendering through Vulkan instead of OpenGL'
 )
+conflicts=('musubi-bin')
 # makepkg's LTO flags would also reach the bundled C code (SQLite, aws-lc), a common cause
 # of link failures in Rust packages; Cargo already does thin LTO. The release profile
 # strips the binary, so a debug package would be empty.
 options=('!lto' '!debug')
-source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('d67ac8ea668658ebab1b11b7378e5512c3fbec4758884e1f7585928e12115a55')
 
 prepare() {
-  cd "$pkgname-$pkgver"
+  cd "$startdir"
   export RUSTUP_TOOLCHAIN=stable
   cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
 }
 
 build() {
-  cd "$pkgname-$pkgver"
+  cd "$startdir"
   export RUSTUP_TOOLCHAIN=stable
-  export CARGO_TARGET_DIR=target
+  export CARGO_TARGET_DIR="$startdir/target"
   cargo build --frozen --release -p musubi
 }
 
 check() {
-  cd "$pkgname-$pkgver"
+  cd "$startdir"
   export RUSTUP_TOOLCHAIN=stable
-  export CARGO_TARGET_DIR=target
+  export CARGO_TARGET_DIR="$startdir/target"
   cargo test --frozen --release --workspace
 }
 
 package() {
-  cd "$pkgname-$pkgver"
+  cd "$startdir"
   install -Dm755 target/release/musubi -t "$pkgdir/usr/bin/"
   install -Dm644 packaging/musubi.desktop -t "$pkgdir/usr/share/applications/"
   install -Dm644 packaging/musubi.svg -t "$pkgdir/usr/share/icons/hicolor/scalable/apps/"

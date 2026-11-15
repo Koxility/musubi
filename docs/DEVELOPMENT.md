@@ -68,7 +68,7 @@ Everything is written in English: code comments, UI, docs and commit messages. O
 
 ## Releasing
 
-1. Set the version in `Cargo.toml` (`[workspace.package]`) and run `cargo build` once, so `Cargo.lock` picks up the new version. The release workflow builds with `--locked` and fails otherwise.
+1. Set the version in `Cargo.toml` (`[workspace.package]`) and run `cargo build` once, so `Cargo.lock` picks up the new version. The release workflow builds with `--locked` and fails otherwise. Set the same version as `pkgver` in `PKGBUILD`, with `pkgrel=1`; a test fails until they match.
 2. Add a `## [x.y.z] - YYYY-MM-DD` section to `CHANGELOG.md`.
 3. Merge to `master`, then fetch it, tag and push. Without the fetch, `origin/master` can be stale and the tag lands on an older commit; the release then fails because the version doesn't match.
 
@@ -92,28 +92,8 @@ The tag starts `.github/workflows/release.yml`. It runs clippy and the tests, th
 packaging/package.sh x.y.z
 ```
 
-### Arch packages
+### Arch package
 
-`packaging/aur/musubi` builds from the GitHub source tarball of a tag, `packaging/aur/musubi-bin` repackages the release archive. The PKGBUILDs in the repository always describe the latest *published* release, with its real checksums: the tarball and the archive of a release only exist once it is out, so their checksums cannot be part of the commit that gets tagged. Do not set `pkgver` by hand and never set a checksum to `SKIP`; `packaging/package.sh` refuses to pack a release while one is.
-
-After the workflow has published the release, move both PKGBUILDs to it. Run on an Arch machine (needs `pacman-contrib`):
-
-```bash
-packaging/aur/update.sh x.y.z
-```
-
-It sets `pkgver`, fills in the checksums and regenerates `.SRCINFO`. Build both once with `makepkg -si` in a clean chroot or at least a clean directory, commit the result to `master`, then copy `PKGBUILD` and `.SRCINFO` of each into its AUR repository and push:
-
-```bash
-git clone ssh://aur@aur.archlinux.org/musubi.git aur-musubi
-```
-
-```bash
-cp packaging/aur/musubi/{PKGBUILD,.SRCINFO} aur-musubi/ && cd aur-musubi && git add PKGBUILD .SRCINFO && git commit -m "Update to x.y.z" && git push
-```
-
-The same for `musubi-bin`.
-
-The app's own update check depends on this step: a copy that pacman owns is only offered a new version once the PKGBUILD of its package on `master` has reached it, and then rebuilds itself from exactly that PKGBUILD. Until `update.sh` has run and its result is on `master`, Arch users see no update.
+`PKGBUILD` at the repository root builds the checkout it sits in; it has no `source` array and no checksums to maintain. Its `pkgver` moves with the version in step 1, so every release tag carries a PKGBUILD of its own version. The app's update for pacman-owned copies relies on that: it clones the tag and runs `makepkg -si` there.
 
 A fix to the packaging alone, without a new release, raises `pkgrel` instead of `pkgver`.
